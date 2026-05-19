@@ -10,11 +10,21 @@ from app.audio.extractor import extract_audio
 from app.config import (
     DEFAULT_CHUNK_MINUTES,
     DEFAULT_OUTPUT_DIR,
+    DEFAULT_SUMMARY_DIR,
     DEFAULT_TRANSCRIPT_DIR,
+    OLLAMA_HOST,
+    OLLAMA_MODEL_DEFAULT,
     WHISPER_MODEL_DEFAULT,
 )
 from app.stt.exceptions import ModelNotAvailableError, TranscriptionError
 from app.stt.transcriber import transcribe_audio
+from app.summary.exceptions import (
+    EmptyTranscriptError,
+    SummaryAPIError,
+    SummaryConfigError,
+    SummaryError,
+)
+from app.summary.summarizer import summarize_transcript
 
 EXIT_SUCCESS = 0
 EXIT_FILE_NOT_FOUND = 1
@@ -22,6 +32,7 @@ EXIT_NO_AUDIO = 2
 EXIT_FFMPEG = 3
 EXIT_INVALID_ARGS = 4
 EXIT_STT = 5
+EXIT_SUMMARY = 6
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -75,6 +86,35 @@ def _add_transcribe_args(parser: argparse.ArgumentParser) -> None:
         "--keep-chunks",
         action="store_true",
         help="Keep temporary chunk WAV files after parallel transcribe",
+    )
+
+
+def _add_summarize_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        default=OLLAMA_MODEL_DEFAULT,
+        help=f"Ollama model tag (default: {OLLAMA_MODEL_DEFAULT})",
+    )
+    parser.add_argument(
+        "--language",
+        default=None,
+        help="Summary language, e.g. ru (default: from transcript or ru)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_SUMMARY_DIR,
+        help=f"Summary output directory (default: {DEFAULT_SUMMARY_DIR})",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        default=OLLAMA_HOST,
+        help=f"Ollama API base URL (default: {OLLAMA_HOST})",
+    )
+    parser.add_argument(
+        "--with-quotes",
+        action="store_true",
+        help="Include timestamped quotes when transcript has segments",
     )
 
 
@@ -154,6 +194,49 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_transcribe_args(process)
     process.add_argument(
+        "--summarize",
+        action="store_true",
+        help="After transcribe, run local LLM summary (Ollama)",
+    )
+    process.add_argument(
+        "--summary-model",
+        default=OLLAMA_MODEL_DEFAULT,
+        help=f"Ollama model for --summarize (default: {OLLAMA_MODEL_DEFAULT})",
+    )
+    process.add_argument(
+        "--summary-dir",
+        type=Path,
+        default=DEFAULT_SUMMARY_DIR,
+        help=f"Summary output directory (default: {DEFAULT_SUMMARY_DIR})",
+    )
+    process.add_argument(
+        "--ollama-host",
+        default=OLLAMA_HOST,
+        help=f"Ollama API URL for --summarize (default: {OLLAMA_HOST})",
+    )
+    process.add_argument(
+        "--with-quotes",
+        action="store_true",
+        help="Include timestamped quotes in summary",
+    )
+    process.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Debug logging",
+    )
+
+    summarize = subparsers.add_parser(
+        "summarize",
+        help="Summarize transcript via local Ollama LLM",
+    )
+    summarize.add_argument(
+        "transcript_path",
+        type=Path,
+        help="Path to transcript .json or .txt from transcribe",
+    )
+    _add_summarize_args(summarize)
+    summarize.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -163,7 +246,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _run_transcribe_args(args: argparse.Namespace, audio_path: Path) -> int:
+def _run_transcribe_args(
+    args: argparse.Namespace, audio_path: Path
+) -> tuple[int, Path | None]:
     print(
         f"Starting transcription: {audio_path} "
         f"(model={args.model}, parallel={args.parallel})",
@@ -183,16 +268,16 @@ def _run_transcribe_args(args: argparse.Namespace, audio_path: Path) -> int:
         )
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        return EXIT_FILE_NOT_FOUND
+        return EXIT_FILE_NOT_FOUND, None
     except (ModelNotAvailableError, TranscriptionError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        return EXIT_STT
+        return EXIT_STT, None
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
-        return EXIT_INVALID_ARGS
+        return EXIT_INVALID_ARGS, None
 
     print(result.txt_path)
-    return EXIT_SUCCESS
+    return EXIT_SUCCESS, result.json_path
 
 
 def _cmd_extract_audio(args: argparse.Namespace) -> int:
@@ -227,7 +312,8 @@ def _cmd_extract_audio(args: argparse.Namespace) -> int:
 
 
 def _cmd_transcribe(args: argparse.Namespace) -> int:
-    return _run_transcribe_args(args, args.audio_path)
+    code, _ = _run_transcribe_args(args, args.audio_path)
+    return code
 
 
 def _cmd_process(args: argparse.Namespace) -> int:
@@ -256,7 +342,65 @@ def _cmd_process(args: argparse.Namespace) -> int:
         return EXIT_INVALID_ARGS
 
     print(f"Audio: {audio_path}")
-    return _run_transcribe_args(args, audio_path)
+    code, json_path = _run_transcribe_args(args, audio_path)
+    if code != EXIT_SUCCESS or not args.summarize:
+        return code
+    if json_path is None:
+        print("Error: transcript path missing after transcribe", file=sys.stderr)
+        return EXIT_SUMMARY
+    return _run_summarize_args(
+        args,
+        json_path,
+        output_dir=args.summary_dir,
+        model=args.summary_model,
+        ollama_host=args.ollama_host,
+        with_quotes=args.with_quotes,
+    )
+
+
+def _run_summarize_args(
+    args: argparse.Namespace,
+    transcript_path: Path,
+    *,
+    output_dir: Path | None = None,
+    model: str | None = None,
+    ollama_host: str | None = None,
+    with_quotes: bool | None = None,
+) -> int:
+    summary_model = model or getattr(args, "model", OLLAMA_MODEL_DEFAULT)
+    print(f"Starting summary: {transcript_path} (model={summary_model})", flush=True)
+    try:
+        result = summarize_transcript(
+            transcript_path,
+            output_dir=output_dir or args.output_dir,
+            language=getattr(args, "language", None),
+            with_quotes=(
+                with_quotes
+                if with_quotes is not None
+                else getattr(args, "with_quotes", False)
+            ),
+            model=summary_model,
+            ollama_host=ollama_host or getattr(args, "ollama_host", OLLAMA_HOST),
+        )
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_FILE_NOT_FOUND
+    except EmptyTranscriptError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_SUMMARY
+    except (SummaryConfigError, SummaryAPIError, SummaryError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_SUMMARY
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_INVALID_ARGS
+
+    print(result.summary_path)
+    return EXIT_SUCCESS
+
+
+def _cmd_summarize(args: argparse.Namespace) -> int:
+    return _run_summarize_args(args, args.transcript_path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -270,6 +414,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_transcribe(args)
     if args.command == "process":
         return _cmd_process(args)
+    if args.command == "summarize":
+        return _cmd_summarize(args)
 
     parser.error(f"Unknown command: {args.command}")
     return EXIT_INVALID_ARGS

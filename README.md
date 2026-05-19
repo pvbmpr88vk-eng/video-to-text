@@ -140,7 +140,43 @@ python -m app transcribe output/audio/111_*.wav --language ru --parallel --chunk
 
 Код выхода STT: `5` — ошибка модели или транскрипции.
 
+## Этап 3: саммари (локальная LLM, Ollama)
+
+По умолчанию модель **`qwen2.5:3b-instruct`** — рассчитана на **8 GB RAM**. Сначала завершите STT, затем саммари (не параллельно).
+
+### Ollama
+
+```bash
+brew install ollama
+ollama serve   # если не запущен как служба
+./scripts/pull-summary-model.sh
+```
+
+Скрипт скачивает **одну** модель (`qwen2.5:3b-instruct`). Модель `7b` — только вручную при ≥16 GB RAM (см. ТЗ-03).
+
+Опционально скопируйте `.env.example` → `.env`.
+
+### Запуск
+
+```bash
+python -m app summarize output/transcripts/ваш_файл.json --language ru -v
+```
+
+Полный пайплайн с саммари:
+
+```bash
+python -m app process /path/to/video.mp4 --language ru --summarize
+```
+
+Результат в `output/summaries/`:
+
+- `{имя}.summary.md` — пересказ и тезисы;
+- `{имя}.theses.json` — структурированный JSON.
+
+Код выхода саммари: `6` — Ollama недоступна, модель не установлена, пустой текст.
+
 ### Документация
 
 - [ТЗ-01: извлечение аудио](docs/TZ-01-audio-extraction.md)
 - [ТЗ-02: STT](docs/TZ-02-stt.md)
+- [ТЗ-03: саммари (локальная LLM / Ollama)](docs/TZ-03-summary.md)

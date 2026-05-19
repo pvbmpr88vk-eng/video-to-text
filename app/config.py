@@ -1,9 +1,20 @@
+import os
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_BIN_DIR = PROJECT_ROOT / ".local" / "bin"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "audio"
 DEFAULT_TRANSCRIPT_DIR = PROJECT_ROOT / "output" / "transcripts"
+DEFAULT_SUMMARY_DIR = PROJECT_ROOT / "output" / "summaries"
+
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_MODEL_DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
+OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))
+SUMMARY_CHUNK_CHAR_LIMIT = int(os.environ.get("SUMMARY_CHUNK_CHAR_LIMIT", "6000"))
+SUMMARY_CHUNK_OVERLAP = int(os.environ.get("SUMMARY_CHUNK_OVERLAP", "300"))
+SUMMARY_TEMPERATURE = float(os.environ.get("SUMMARY_TEMPERATURE", "0.2"))
+SUMMARY_NUM_PREDICT = int(os.environ.get("SUMMARY_NUM_PREDICT", "2048"))
+SUMMARY_REQUEST_TIMEOUT_SEC = float(os.environ.get("SUMMARY_REQUEST_TIMEOUT_SEC", "300"))
 
 WHISPER_MODEL_DEFAULT = "small"
 WHISPER_DEVICE = "cpu"

@@ -441,7 +441,7 @@ python -m app transcribe "output/audio/111_20260519T142840Z.wav" \
 
 - `text` — вход для LLM-саммари и тезисов.
 - `segments[]` — для привязки тезисов ко времени (опционально в ТЗ-03).
-- `duration_sec` — оценка стоимости облачного LLM по токенам.
+- `duration_sec` — оценка времени этапа 3 (map-reduce) и длины входа для LLM.
 - `language` — выбор промпта на RU/EN.
 
 ---
@@ -477,7 +477,7 @@ python -m app transcribe "output/audio/111_20260519T142840Z.wav" \
 
 ## 16. Следующий шаг после приёмки ТЗ-02
 
-**ТЗ-03:** отправка `text` / `segments` в LLM для тезисного разбора и пересказа (выбор: та же облачная модель или отдельная; API-ключ; промпты RU).
+**ТЗ-03:** [саммари и тезисы](TZ-03-summary.md) — локальная LLM (Ollama, `qwen2.5:3b-instruct` на 8 GB), map-reduce, CLI `summarize`.
 
 ---
 
