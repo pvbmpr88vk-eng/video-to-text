@@ -1,4 +1,5 @@
 # Python
+.pytest_cache/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -15,9 +16,13 @@ venv/
 *.mp3
 output/
 transcripts/
+**/.chunks/
 
 # CLT manual install artifacts
 .clt-install/
+
+# Local ffmpeg binaries (optional, no brew)
+.local/
 
 # OS & IDE
 .DS_Store
