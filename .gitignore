@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Media & outputs
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+output/
+transcripts/
+
+# CLT manual install artifacts
+.clt-install/
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
