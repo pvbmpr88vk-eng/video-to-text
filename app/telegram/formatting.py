@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.config import TELEGRAM_MAX_THESIS_LINES_IN_CHAT, TELEGRAM_MESSAGE_MAX_LEN
+from app.config import TELEGRAM_MESSAGE_MAX_LEN
 
 
 def split_telegram_message(text: str, limit: int = TELEGRAM_MESSAGE_MAX_LEN) -> list[str]:
@@ -48,7 +48,7 @@ def split_telegram_message(text: str, limit: int = TELEGRAM_MESSAGE_MAX_LEN) -> 
 
 
 def format_summary_for_chat(payload: dict[str, Any]) -> str:
-    """Plain-text summary for chat: summary + up to N theses + action lines."""
+    """Plain-text summary for chat: summary + all theses + action lines."""
     summary = (payload.get("summary") or "").strip()
     theses = payload.get("theses") or []
     if not isinstance(theses, list):
@@ -56,14 +56,12 @@ def format_summary_for_chat(payload: dict[str, Any]) -> str:
     actions = payload.get("action_items") or []
 
     lines: list[str] = ["📋 Краткий пересказ", "", summary, "", "📌 Тезисы", ""]
-    for i, t in enumerate(theses[:TELEGRAM_MAX_THESIS_LINES_IN_CHAT], start=1):
+    n = 0
+    for t in theses:
         t = str(t).strip()
         if t:
-            lines.append(f"{i}. {t}")
-    if len(theses) > TELEGRAM_MAX_THESIS_LINES_IN_CHAT:
-        lines.append(
-            f"… ещё {len(theses) - TELEGRAM_MAX_THESIS_LINES_IN_CHAT} тезисов — см. файл .summary.md"
-        )
+            n += 1
+            lines.append(f"{n}. {t}")
 
     if actions:
         lines.extend(["", "✅ Действия", ""])

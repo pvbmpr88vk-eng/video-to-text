@@ -1,0 +1,79 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  bot:
+    build: .
+    command: python -m app bot
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+      - ./telegram-bot.access.txt:/app/telegram-bot.access.txt:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker-transcript:
+    build: .
+    command: python -m app worker transcript
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 1
+
+  worker-summary:
+    build: .
+    command: python -m app worker summary
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      OLLAMA_HOST: http://host.docker.internal:11434
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./output:/app/output
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 1
+
+volumes:
+  redis_data:

@@ -23,10 +23,14 @@ class ChunkSpec:
     duration_sec: float
 
 
-def resolve_workers(workers: int | None) -> int:
+def resolve_workers(workers: int | None, *, default: int | None = None) -> int:
+    if workers is not None:
+        return max(1, workers)
+    if default is not None:
+        return max(1, default)
     cpu = os.cpu_count() or 2
-    default = min(DEFAULT_MAX_WORKERS, max(1, cpu - 1))
-    return max(1, workers if workers is not None else default)
+    fallback = min(DEFAULT_MAX_WORKERS, max(1, cpu - 1))
+    return max(1, fallback)
 
 
 def probe_audio_duration(audio_path: Path) -> float:

@@ -26,6 +26,9 @@ HELP = (
 ACCESS_DENIED = "У вас нет доступа к этому боту."
 RATE_LIMIT = "Слишком много файлов за час. Подождите и попробуйте позже."
 BUSY = "Уже идёт обработка. Дождитесь окончания или /status."
+QUEUE_FULL = "Очередь переполнена ({max_size} задач). Попробуйте позже."
+QUEUE_POSITION = "Файл принят. В очереди (позиция {position})…"
+DOWNLOADING = "Скачиваю файл…"
 NO_IDS_CONFIGURED = (
     "В настройках не указан ALLOWED_USER_IDS — медиа не принимаются. "
     "Добавьте свой числовой user id в telegram-bot.access.txt (см. @userinfobot)."

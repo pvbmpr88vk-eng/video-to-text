@@ -190,17 +190,69 @@ cp telegram-bot.access.example.txt telegram-bot.access.txt
 
 Опционально: переменные `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ACCESS_FILE` в окружении перекрывают файл.
 
-3. Нужны **FFmpeg**; для кнопки «Сделать тезисы» — запущенная **Ollama** с моделью из этапа 3.
+3. Нужна **Redis** и воркеры (этап 5); для кнопки «Сделать тезисы» — запущенная **Ollama** с моделью из этапа 3.
 
 ### Запуск
 
+**Локально (3 процесса):**
+
 ```bash
+# 1. Redis
+brew services start redis   # или: docker compose up redis -d
+
+# 2. Воркеры (отдельные терминалы)
+python -m app worker transcript
+python -m app worker summary
+
+# 3. Бот
 python -m app bot -v
 ```
 
-Код выхода **`7`** — нет токена / неверные credentials, или нет FFmpeg.
+**Docker Compose** (redis + bot + 2 workers):
 
-Подробнее: [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md).
+```bash
+cp .env.example .env   # при необходимости
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+Проверка инфраструктуры:
+
+```bash
+python -m app health
+python -m app jobs cleanup --dry-run
+```
+
+Код выхода **`7`** — нет токена / неверные credentials, или Redis недоступен.
+
+Подробнее: [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md), [ТЗ-05: параллельный backend](docs/TZ-05-parallel-backend.md).
+
+## Этап 5: очередь задач (Redis + RQ)
+
+Бот только принимает файлы и ставит задачи в очередь; **STT и саммари выполняют отдельные worker-процессы**. Состояние задач хранится в Redis; артефакты — в `output/jobs/{uuid}/`.
+
+### Требования
+
+- **Redis** (`REDIS_URL`, по умолчанию `redis://127.0.0.1:6379/0`)
+- Скопируйте `.env.example` → `.env` и при необходимости настройте лимиты:
+
+| Переменная | По умолчанию | Назначение |
+|------------|--------------|------------|
+| `MAX_CONCURRENT_JOBS` | 1 | Число transcript-воркеров (через `docker compose` replicas) |
+| `MAX_STT_WORKERS_PER_JOB` | 1 | Процессов STT внутри одной задачи |
+| `MAX_CONCURRENT_SUMMARIES` | 1 | Параллельных саммари |
+| `MAX_QUEUE_SIZE` | 5 | Макс. задач transcript в очереди |
+
+### CLI
+
+```bash
+python -m app worker transcript   # очередь STT
+python -m app worker summary      # очередь Ollama
+python -m app health              # Redis + FFmpeg (+ Ollama)
+python -m app jobs cleanup        # удалить каталоги jobs старше TTL
+```
+
+FFmpeg и faster-whisper загружаются **только в transcript-worker**, не в процессе бота.
 
 ### Документация
 
@@ -208,3 +260,4 @@ python -m app bot -v
 - [ТЗ-02: STT](docs/TZ-02-stt.md)
 - [ТЗ-03: саммари (локальная LLM / Ollama)](docs/TZ-03-summary.md)
 - [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md)
+- [ТЗ-05: параллельный backend (Redis + RQ)](docs/TZ-05-parallel-backend.md)

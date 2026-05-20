@@ -80,6 +80,12 @@ def test_resolve_workers_explicit():
     assert resolve_workers(2) == 2
 
 
+def test_resolve_workers_env_default():
+    from app.config import MAX_STT_WORKERS_PER_JOB
+
+    assert resolve_workers(None, default=MAX_STT_WORKERS_PER_JOB) == MAX_STT_WORKERS_PER_JOB
+
+
 def test_read_duration_from_sidecar(tmp_path):
     audio = tmp_path / "clip.wav"
     audio.write_bytes(b"x")

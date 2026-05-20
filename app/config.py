@@ -19,7 +19,6 @@ TELEGRAM_ENABLE_SUMMARY = os.environ.get("TELEGRAM_ENABLE_SUMMARY", "true").lowe
 TELEGRAM_MESSAGE_MAX_LEN = 4096
 TELEGRAM_BOT_FILE_SIZE_LIMIT = 20_000_000
 TELEGRAM_STATUS_EDIT_MIN_SEC = 30.0
-TELEGRAM_MAX_THESIS_LINES_IN_CHAT = 15
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL_DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
@@ -47,3 +46,26 @@ WAV_CODEC = "pcm_s16le"
 MP3_CODEC = "libmp3lame"
 
 FFMPEG_STDERR_LOG_LIMIT = 2048
+
+# --- Job queue (TZ-05) ---
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
+JOB_QUEUE_ENABLED = os.environ.get("JOB_QUEUE_ENABLED", "true").lower() in ("1", "true", "yes")
+
+MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
+MAX_STT_WORKERS_PER_JOB = int(os.environ.get("MAX_STT_WORKERS_PER_JOB", "1"))
+MAX_CONCURRENT_SUMMARIES = int(os.environ.get("MAX_CONCURRENT_SUMMARIES", "1"))
+MAX_QUEUE_SIZE = int(os.environ.get("MAX_QUEUE_SIZE", "5"))
+
+JOB_TRANSCRIPT_TIMEOUT_SEC = int(os.environ.get("JOB_TRANSCRIPT_TIMEOUT_SEC", "7200"))
+JOB_SUMMARY_TIMEOUT_SEC = int(os.environ.get("JOB_SUMMARY_TIMEOUT_SEC", "1800"))
+JOB_MAX_RETRIES = int(os.environ.get("JOB_MAX_RETRIES", "2"))
+JOB_RETRY_DELAY_SEC = int(os.environ.get("JOB_RETRY_DELAY_SEC", "60"))
+JOB_CLEANUP_TTL_HOURS = int(os.environ.get("JOB_CLEANUP_TTL_HOURS", "24"))
+
+JOBS_BASE_DIR = PROJECT_ROOT / "output" / "jobs"
+
+RQ_QUEUE_TRANSCRIPT = "transcript"
+RQ_QUEUE_SUMMARY = "summary"
+
+LOG_FORMAT = os.environ.get("LOG_FORMAT", "text").strip().lower()
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()

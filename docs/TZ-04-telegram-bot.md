@@ -541,9 +541,11 @@ v1.1 (webhook, Local Bot API): +8 ч.
 
 ## 15. Следующий шаг после приёмки ТЗ-04
 
-**ТЗ-05:** загрузка медиа по URL (`yt-dlp`), интеграция с тем же `PipelineJob`.
+**ТЗ-05:** [параллельный backend — Redis + RQ workers](TZ-05-parallel-backend.md).
 
-**ТЗ-06 (рабочее название):** единый монолит — деплой, systemd/launchd, healthcheck, один скрипт `install.sh`.
+**ТЗ-06:** загрузка медиа по URL (`yt-dlp`).
+
+**ТЗ-07 (рабочее название):** деплой без Docker — systemd/launchd, healthcheck.
 
 ---
 

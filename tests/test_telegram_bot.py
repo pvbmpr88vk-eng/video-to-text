@@ -50,14 +50,16 @@ def test_split_telegram_message_exact_limit() -> None:
     assert len(out[0]) == TELEGRAM_MESSAGE_MAX_LEN
 
 
-def test_format_summary_for_chat_caps_theses() -> None:
+def test_format_summary_for_chat_all_theses() -> None:
     payload = {
         "summary": "Кратко.",
         "theses": [f"Тезис {i}" for i in range(20)],
         "action_items": [{"text": "Сделать X"}],
     }
     text = format_summary_for_chat(payload)
-    assert "… ещё" in text
+    assert "… ещё" not in text
+    assert "summary.md" not in text
+    assert "20. Тезис 19" in text
     assert "1. Тезис 0" in text
 
 
@@ -105,20 +107,10 @@ def test_load_credentials_bad_user_id(tmp_path: Path, monkeypatch: pytest.Monkey
         load_credentials()
 
 
-def test_transcript_job_register(tmp_path: Path) -> None:
-    from app.telegram.jobs import get_transcript_job, parse_theses_callback, register_transcript_job
+def test_parse_theses_callback() -> None:
+    from app.telegram.jobs import parse_theses_callback
 
-    bot_data: dict = {"transcript_jobs": {}}
-    jp = tmp_path / "t.json"
-    tp = tmp_path / "t.txt"
-    jp.write_text("{}", encoding="utf-8")
-    tp.write_text("hello", encoding="utf-8")
-    job_id = register_transcript_job(
-        bot_data, user_id=42, json_path=jp, txt_path=tp, language="ru"
-    )
-    assert len(job_id) == 12
-    job = get_transcript_job(bot_data, job_id)
-    assert job is not None
-    assert job.user_id == 42
+    job_id = "550e8400-e29b-41d4-a716-446655440000"
     assert parse_theses_callback(f"theses:{job_id}") == job_id
     assert parse_theses_callback("other") is None
+    assert parse_theses_callback("theses:") is None

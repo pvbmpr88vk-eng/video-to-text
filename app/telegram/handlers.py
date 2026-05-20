@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import Message, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -17,34 +16,20 @@ from telegram.ext import (
     filters,
 )
 
-from app.audio.exceptions import FFmpegError, FFmpegNotFoundError, NoAudioStreamError
 from app.config import (
-    DEFAULT_OUTPUT_DIR,
-    DEFAULT_SUMMARY_DIR,
-    DEFAULT_TRANSCRIPT_DIR,
+    MAX_QUEUE_SIZE,
     TELEGRAM_BOT_FILE_SIZE_LIMIT,
     TELEGRAM_DEFAULT_LANGUAGE,
-    TELEGRAM_STATUS_EDIT_MIN_SEC,
 )
-from app.stt.exceptions import ModelNotAvailableError, TranscriptionError
-from app.summary.exceptions import (
-    EmptyTranscriptError,
-    SummaryAPIError,
-    SummaryConfigError,
-    SummaryError,
-)
+from app.jobs.models import JobStatus, JobType
+from app.jobs.paths import ensure_job_dirs, job_inbox_dir
+from app.jobs.store import JobStore
+from app.queue.enqueue import cancel_rq_job, enqueue_summary, enqueue_transcript
 from app.telegram import messages as M
 from app.telegram.auth import MediaRateLimiter, is_allowed
 from app.telegram.credentials import TelegramCredentials
-from app.telegram.formatting import format_summary_for_chat, split_telegram_message
-from app.telegram.jobs import (
-    CALLBACK_THESES_PREFIX,
-    get_transcript_job,
-    parse_theses_callback,
-    register_transcript_job,
-)
-from app.telegram.pipeline import PipelineCancelled, run_summarize_pipeline, run_transcript_pipeline
-from app.telegram.queue import JobCoordinator, JobPhase
+from app.telegram.jobs import CALLBACK_THESES_PREFIX, parse_theses_callback
+from app.telegram.notify import track_job, track_theses_message
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +37,6 @@ ALLOWED_SUFFIXES = frozenset(
     {".mp4", ".mov", ".mkv", ".webm", ".m4a", ".wav", ".mp3", ".ogg", ".opus"}
 )
 URL_RE = re.compile(r"https?://", re.I)
-
-
-def _theses_keyboard(job_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("📌 Сделать тезисы", callback_data=f"{CALLBACK_THESES_PREFIX}{job_id}")]]
-    )
 
 
 def _document_allowed(doc) -> bool:
@@ -95,28 +74,16 @@ def pick_media(message: Message) -> tuple[str, int | None, str] | None:
     return None
 
 
-def _inbox_path(inbox: Path, chat_id: int, fname: str) -> Path:
+def _inbox_filename(chat_id: int, fname: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     base = Path(fname).name
     safe = re.sub(r"[^\w\.\-]", "_", base).strip("._") or "media"
     safe = safe[:120]
-    return inbox / f"{chat_id}_{ts}_{safe}"
+    return f"{chat_id}_{ts}_{safe}"
 
 
-async def _edit_status(
-    coord: JobCoordinator,
-    status_msg: Message | None,
-    text: str,
-) -> Message | None:
-    if not status_msg:
-        return None
-    if not coord.can_edit_status(TELEGRAM_STATUS_EDIT_MIN_SEC):
-        return status_msg
-    try:
-        await status_msg.edit_text(text)
-    except Exception:
-        logger.debug("edit_text failed", exc_info=True)
-    return status_msg
+def _store(context: ContextTypes.DEFAULT_TYPE) -> JobStore:
+    return context.application.bot_data["job_store"]
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -139,21 +106,45 @@ def _allowed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return bool(creds.allowed_user_ids) and is_allowed(u.id, creds.allowed_user_ids)
 
 
+def _format_job_line(job) -> str:
+    return f"• {job.job_id[:8]}… — {job.status.value} ({job.job_type.value})"
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update, context):
         await update.effective_message.reply_text(M.ACCESS_DENIED)
         return
-    coord: JobCoordinator = context.application.bot_data["coord"]
-    await update.effective_message.reply_text(f"Состояние: {coord.phase}")
+    user = update.effective_user
+    store = _store(context)
+    jobs = store.list_user_jobs(user.id, limit=5)
+    queued = store.queued_transcript_count()
+    lines = [f"В очереди transcript: {queued} (лимит {MAX_QUEUE_SIZE})"]
+    if jobs:
+        lines.append("Ваши задачи:")
+        lines.extend(_format_job_line(j) for j in jobs)
+    else:
+        lines.append("Активных задач нет.")
+    await update.effective_message.reply_text("\n".join(lines))
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _allowed(update, context):
         await update.effective_message.reply_text(M.ACCESS_DENIED)
         return
-    coord: JobCoordinator = context.application.bot_data["coord"]
-    coord.request_cancel()
-    await update.effective_message.reply_text(M.CANCEL_ACK)
+    user = update.effective_user
+    store = _store(context)
+    jobs = store.list_user_jobs(user.id, limit=10)
+    cancelled = 0
+    for job in jobs:
+        if job.status not in (JobStatus.QUEUED, JobStatus.DOWNLOADING, JobStatus.EXTRACT, JobStatus.STT, JobStatus.SUMMARY):
+            continue
+        store.cancel(job.job_id)
+        cancel_rq_job(job.rq_job_id)
+        cancelled += 1
+    if cancelled:
+        await update.effective_message.reply_text(M.CANCEL_ACK)
+    else:
+        await update.effective_message.reply_text("Нет задач для отмены.")
 
 
 async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -162,8 +153,8 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     creds: TelegramCredentials = context.application.bot_data["creds"]
-    coord: JobCoordinator = context.application.bot_data["coord"]
     rl: MediaRateLimiter = context.application.bot_data["rate_limiter"]
+    store = _store(context)
     user = update.effective_user
     if not user:
         return
@@ -174,20 +165,13 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_allowed(user.id, creds.allowed_user_ids):
         await message.reply_text(M.ACCESS_DENIED)
         return
-
-    if not await coord.try_begin():
-        await message.reply_text(M.BUSY)
-        return
-
     if not rl.allow(user.id):
-        await coord.end()
         await message.reply_text(M.RATE_LIMIT)
         return
+    if store.queue_full():
+        await message.reply_text(M.QUEUE_FULL.format(max_size=MAX_QUEUE_SIZE))
+        return
 
-    inbox = Path(context.application.bot_data["inbox_dir"])
-    inbox.mkdir(parents=True, exist_ok=True)
-
-    status_msg: Message | None = None
     try:
         if message.document and not _document_allowed(message.document):
             await message.reply_text(M.UNSUPPORTED_DOCUMENT)
@@ -203,97 +187,47 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await message.reply_text(M.FILE_TOO_LARGE.format(size_mb=file_size / 1e6))
             return
 
-        dest = _inbox_path(inbox, message.chat_id, fname)
-        status_msg = await message.reply_text("Файл принят. Скачиваю…")
-        coord.set_phase(JobPhase.DOWNLOADING)
+        job_id = str(uuid.uuid4())
+        ensure_job_dirs(job_id)
+        dest = job_inbox_dir(job_id) / _inbox_filename(message.chat_id, fname)
+
+        status_msg = await message.reply_text(M.DOWNLOADING)
+        job = store.create(
+            job_id=job_id,
+            job_type=JobType.TRANSCRIPT,
+            user_id=user.id,
+            chat_id=message.chat_id,
+            language=TELEGRAM_DEFAULT_LANGUAGE,
+            message_id=message.message_id,
+            status_message_id=status_msg.message_id,
+            inbox_path=str(dest),
+        )
+        store.update_status(job_id, JobStatus.DOWNLOADING, publish=True)
 
         tg_file = await context.bot.get_file(file_id)
         remote_size = getattr(tg_file, "file_size", None) or file_size
         if remote_size is not None and remote_size > TELEGRAM_BOT_FILE_SIZE_LIMIT:
+            store.update_status(job_id, JobStatus.FAILED, error="file_too_large")
             await message.reply_text(M.FILE_TOO_LARGE.format(size_mb=remote_size / 1e6))
             return
 
         await tg_file.download_to_drive(custom_path=str(dest))
 
-        coord.set_phase(JobPhase.EXTRACT)
-        status_msg = await _edit_status(
-            coord,
-            status_msg,
-            "Скачано. Извлечение аудио и распознавание речи на CPU (долго на длинных файлах)…",
-        ) or status_msg
+        position = store.queued_transcript_count()
+        store.update_status(job_id, JobStatus.QUEUED, publish=True)
+        enqueue_transcript(store, job)
+        await status_msg.edit_text(M.QUEUE_POSITION.format(position=max(1, position)))
 
-        language = TELEGRAM_DEFAULT_LANGUAGE
-
-        try:
-            result = await asyncio.to_thread(
-                run_transcript_pipeline,
-                dest,
-                audio_dir=DEFAULT_OUTPUT_DIR,
-                transcript_dir=DEFAULT_TRANSCRIPT_DIR,
-                language=language,
-                cancel_event=coord.cancel_event(),
-            )
-        except PipelineCancelled:
-            await message.reply_text(M.PIPELINE_CANCELLED)
-            return
-        except NoAudioStreamError:
-            await message.reply_text(M.ERR_NO_AUDIO)
-            return
-        except FFmpegNotFoundError:
-            await message.reply_text(M.ERR_FFMPEG_MISSING)
-            return
-        except FFmpegError as exc:
-            await message.reply_text(f"Ошибка FFmpeg: {exc}")
-            return
-        except ModelNotAvailableError:
-            await message.reply_text(M.ERR_STT_MODEL)
-            return
-        except TranscriptionError as exc:
-            await message.reply_text(f"{M.ERR_STT} ({exc})")
-            return
-        except FileNotFoundError as exc:
-            await message.reply_text(f"Файл не найден: {exc}")
-            return
-        except ValueError as exc:
-            await message.reply_text(f"Ошибка: {exc}")
-            return
-
-        job_id = register_transcript_job(
-            context.application.bot_data,
-            user_id=user.id,
-            json_path=result.transcript_json,
-            txt_path=result.transcript_txt,
-            language=language,
+        track_job(
+            context.application,
+            job_id=job_id,
+            chat_id=message.chat_id,
+            status_message_id=status_msg.message_id,
+            reply_to_message_id=message.message_id,
         )
-
-        mins = result.duration_sec / 60.0 if result.duration_sec else 0.0
-        stats = M.TRANSCRIPT_CAPTION.format(
-            mins=mins,
-            model=result.stt_model,
-            proc_min=result.processing_sec / 60.0,
-        )
-
-        if result.transcript_txt.is_file():
-            if status_msg:
-                try:
-                    await status_msg.delete()
-                except Exception:
-                    logger.debug("Could not delete status message", exc_info=True)
-
-            # 1) Сначала только файл транскрипта (без саммари)
-            logger.info("Sending transcript file: %s", result.transcript_txt)
-            await message.reply_document(
-                document=str(result.transcript_txt.resolve()),
-                caption="Транскрипт (.txt)",
-            )
-            # 2) Статистика и кнопка тезисов — отдельным сообщением
-            await message.reply_text(stats, reply_markup=_theses_keyboard(job_id))
-        else:
-            await message.reply_text("Транскрипт не найден на диске.")
-
-        coord.set_phase(JobPhase.IDLE)
-    finally:
-        await coord.end()
+    except Exception:
+        logger.exception("Failed to enqueue media job")
+        await message.reply_text("Не удалось принять файл. Попробуйте позже.")
 
 
 async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -301,8 +235,8 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not query or not query.data:
         return
 
-    job_id = parse_theses_callback(query.data)
-    if not job_id:
+    parent_job_id = parse_theses_callback(query.data)
+    if not parent_job_id:
         return
 
     user = query.from_user
@@ -314,69 +248,52 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(M.ACCESS_DENIED, show_alert=True)
         return
 
-    job = get_transcript_job(context.application.bot_data, job_id)
-    if not job:
+    store = _store(context)
+    parent = store.get(parent_job_id)
+    if not parent:
         await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
         return
-    if job.user_id != user.id:
+    if parent.user_id != user.id:
         await query.answer(M.ACCESS_DENIED, show_alert=True)
         return
-    if not job.json_path.is_file():
+    if parent.status != JobStatus.DONE or not parent.transcript_json:
         await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
         return
-
-    coord: JobCoordinator = context.application.bot_data["coord"]
-    if not await coord.try_begin():
-        await query.answer(M.SUMMARY_BUSY, show_alert=True)
+    if not Path(parent.transcript_json).is_file():
+        await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
         return
 
     await query.answer(M.SUMMARY_STARTED)
-
     chat_id = query.message.chat_id if query.message else user.id
     status_msg = await context.bot.send_message(chat_id, M.SUMMARY_STARTED)
-    coord.set_phase(JobPhase.SUMMARY)
 
-    try:
-        summary = await asyncio.to_thread(
-            run_summarize_pipeline,
-            job.json_path,
-            summary_dir=DEFAULT_SUMMARY_DIR,
-            language=job.language,
-        )
+    summary_job_id = str(uuid.uuid4())
+    ensure_job_dirs(summary_job_id)
+    summary_job = store.create(
+        job_id=summary_job_id,
+        job_type=JobType.SUMMARY,
+        user_id=user.id,
+        chat_id=chat_id,
+        language=parent.language,
+        status_message_id=status_msg.message_id,
+        parent_job_id=parent_job_id,
+    )
+    enqueue_summary(store, summary_job)
 
-        payload = json.loads(summary.theses_json.read_text(encoding="utf-8"))
-        body = format_summary_for_chat(payload)
-        for part in split_telegram_message(body):
-            await context.bot.send_message(chat_id, part)
+    if query.message:
+        track_theses_message(context.application, parent_job_id, query.message.message_id)
 
-        await context.bot.send_message(
-            chat_id,
-            M.SUMMARY_DONE.format(
-                proc_min=summary.processing_sec / 60.0,
-                model=summary.llm_model,
-            ),
-        )
-
-        if query.message:
-            try:
-                await query.message.edit_reply_markup(reply_markup=None)
-            except Exception:
-                logger.debug("Could not remove inline keyboard", exc_info=True)
-
-        await status_msg.delete()
-    except (
-        EmptyTranscriptError,
-        SummaryConfigError,
-        SummaryAPIError,
-        SummaryError,
-    ) as exc:
-        await status_msg.edit_text(M.ERR_SUMMARY.format(detail=exc))
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Summary failed for job %s", job_id)
-        await status_msg.edit_text(M.ERR_SUMMARY.format(detail=exc))
-    finally:
-        coord.set_phase(JobPhase.IDLE)
-        await coord.end()
+    parent_track = context.application.bot_data.get("tracked_jobs", {}).get(parent_job_id)
+    track_job(
+        context.application,
+        job_id=summary_job_id,
+        chat_id=chat_id,
+        status_message_id=status_msg.message_id,
+    )
+    if parent_track and parent_track.theses_message_id:
+        summary_track = context.application.bot_data["tracked_jobs"].get(summary_job_id)
+        if summary_track:
+            summary_track.theses_message_id = parent_track.theses_message_id
 
 
 async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

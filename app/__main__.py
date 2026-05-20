@@ -37,11 +37,9 @@ EXIT_BOT = 7
 
 
 def _configure_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    from app.logging_setup import configure_logging
+
+    configure_logging(verbose=verbose)
 
 
 def _add_transcribe_args(parser: argparse.ArgumentParser) -> None:
@@ -255,6 +253,28 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Debug logging",
     )
 
+    worker = subparsers.add_parser("worker", help="Run RQ worker (transcript or summary)")
+    worker.add_argument("kind", choices=("transcript", "summary"), help="Worker queue type")
+    worker.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+
+    health = subparsers.add_parser("health", help="Check Redis, FFmpeg, Ollama")
+    health.add_argument(
+        "--skip-ollama",
+        action="store_true",
+        help="Do not check Ollama (for transcript-only workers)",
+    )
+
+    jobs = subparsers.add_parser("jobs", help="Job maintenance")
+    jobs_sub = jobs.add_subparsers(dest="jobs_command", required=True)
+    cleanup = jobs_sub.add_parser("cleanup", help="Remove old job directories")
+    cleanup.add_argument(
+        "--ttl-hours",
+        type=int,
+        default=None,
+        help="TTL in hours (default: JOB_CLEANUP_TTL_HOURS)",
+    )
+    cleanup.add_argument("--dry-run", action="store_true", help="List dirs without deleting")
+
     return parser
 
 
@@ -433,6 +453,22 @@ def main(argv: list[str] | None = None) -> int:
 
         run_bot(verbose=args.verbose)
         return EXIT_SUCCESS
+    if args.command == "worker":
+        from app.worker.runner import run_worker
+
+        run_worker(args.kind, verbose=args.verbose)
+        return EXIT_SUCCESS
+    if args.command == "health":
+        from app.worker.health import run_health_check
+
+        return run_health_check(check_ollama=not args.skip_ollama)
+    if args.command == "jobs":
+        if args.jobs_command == "cleanup":
+            from app.jobs.cleanup import cleanup_old_jobs
+
+            removed = cleanup_old_jobs(ttl_hours=args.ttl_hours, dry_run=args.dry_run)
+            print(f"Removed {removed} job director{'y' if removed == 1 else 'ies'}")
+            return EXIT_SUCCESS
 
     parser.error(f"Unknown command: {args.command}")
     return EXIT_INVALID_ARGS

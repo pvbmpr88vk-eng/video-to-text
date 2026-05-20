@@ -5,15 +5,13 @@ import sys
 
 import httpx
 
-from app.audio.ffmpeg import require_ffmpeg_tools
-from app.config import (
-    DEFAULT_TELEGRAM_INBOX_DIR,
-    OLLAMA_HOST,
-)
+from app.config import JOB_QUEUE_ENABLED, OLLAMA_HOST
+from app.jobs.store import JobStore
+from app.queue.rq_connection import get_redis
 from app.telegram.auth import MediaRateLimiter
 from app.telegram.credentials import CredentialsError, load_credentials
 from app.telegram.handlers import register_handlers
-from app.telegram.queue import JobCoordinator
+from app.telegram.notify import start_notify_listener, stop_notify_listener
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +24,20 @@ def _ollama_reachable() -> bool:
         return False
 
 
+async def _post_init(application) -> None:
+    if JOB_QUEUE_ENABLED:
+        await start_notify_listener(application)
+
+
+async def _post_shutdown(application) -> None:
+    if JOB_QUEUE_ENABLED:
+        await stop_notify_listener(application)
+
+
 def run_bot(*, verbose: bool = False) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    from app.logging_setup import configure_logging
+
+    configure_logging(verbose=verbose)
 
     try:
         creds = load_credentials()
@@ -44,10 +50,15 @@ def run_bot(*, verbose: bool = False) -> None:
         )
         raise SystemExit(7) from exc
 
+    if not JOB_QUEUE_ENABLED:
+        print("Error: JOB_QUEUE_ENABLED=false is no longer supported (TZ-05).", file=sys.stderr)
+        raise SystemExit(7)
+
     try:
-        require_ffmpeg_tools()
+        redis = get_redis()
+        redis.ping()
     except Exception as exc:
-        print(f"Error: FFmpeg required for the bot: {exc}", file=sys.stderr)
+        print(f"Error: Redis unavailable ({exc}). Start Redis before running the bot.", file=sys.stderr)
         raise SystemExit(7) from exc
 
     if not _ollama_reachable():
@@ -58,17 +69,23 @@ def run_bot(*, verbose: bool = False) -> None:
 
     from telegram.ext import Application
 
-    application = Application.builder().token(creds.bot_token).build()
+    application = (
+        Application.builder()
+        .token(creds.bot_token)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
     application.bot_data["creds"] = creds
-    application.bot_data["coord"] = JobCoordinator()
     application.bot_data["rate_limiter"] = MediaRateLimiter()
-    application.bot_data["inbox_dir"] = DEFAULT_TELEGRAM_INBOX_DIR
-    application.bot_data["transcript_jobs"] = {}
+    application.bot_data["redis"] = redis
+    application.bot_data["job_store"] = JobStore(redis)
 
     register_handlers(application)
 
     logger.info(
-        "Starting Telegram bot (allowed user ids: %s)",
+        "Starting Telegram bot (queue=%s, allowed user ids: %s)",
+        JOB_QUEUE_ENABLED,
         sorted(creds.allowed_user_ids) if creds.allowed_user_ids else "none",
     )
     application.run_polling()
