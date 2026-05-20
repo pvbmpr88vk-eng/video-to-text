@@ -4,7 +4,9 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -174,7 +176,8 @@ def transcribe_chunks_parallel(
         workers,
     )
 
-    with ProcessPoolExecutor(max_workers=workers) as executor:
+    mp_ctx = get_context("spawn") if sys.platform == "darwin" else None
+    with ProcessPoolExecutor(max_workers=workers, mp_context=mp_ctx) as executor:
         futures = {
             executor.submit(
                 _transcribe_chunk_task,

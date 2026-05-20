@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +58,9 @@ JOB_QUEUE_ENABLED = os.environ.get("JOB_QUEUE_ENABLED", "true").lower() in ("1",
 
 MAX_CONCURRENT_JOBS = int(os.environ.get("MAX_CONCURRENT_JOBS", "1"))
 MAX_STT_WORKERS_PER_JOB = int(os.environ.get("MAX_STT_WORKERS_PER_JOB", "1"))
+if sys.platform == "darwin":
+    # ProcessPool/fork + ObjC is unsafe on macOS; keep STT in-process for workers.
+    MAX_STT_WORKERS_PER_JOB = min(MAX_STT_WORKERS_PER_JOB, 1)
 MAX_CONCURRENT_SUMMARIES = int(os.environ.get("MAX_CONCURRENT_SUMMARIES", "1"))
 MAX_QUEUE_SIZE = int(os.environ.get("MAX_QUEUE_SIZE", "5"))
 

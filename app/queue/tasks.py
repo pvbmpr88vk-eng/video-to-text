@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import logging
-import os
-import sys
 import time
 from pathlib import Path
 
-if sys.platform == "darwin":
-    os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+from app.darwin import configure_fork_safety
+
+configure_fork_safety()
 
 from app.audio.exceptions import FFmpegError, FFmpegNotFoundError, NoAudioStreamError
 from app.audio.extractor import extract_audio

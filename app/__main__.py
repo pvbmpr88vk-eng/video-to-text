@@ -5,6 +5,10 @@ import logging
 import sys
 from pathlib import Path
 
+from app.darwin import configure_fork_safety
+
+configure_fork_safety()
+
 from app.audio.exceptions import FFmpegError, FFmpegNotFoundError, NoAudioStreamError
 from app.audio.extractor import extract_audio
 from app.config import (
@@ -490,7 +494,8 @@ def main(argv: list[str] | None = None) -> int:
             stats = reset_stuck_jobs()
             print(
                 "Reset: processing_failed={processing_failed}, waiting_failed={waiting_failed}, "
-                "rq_canceled={rq_canceled}, queue_waiting={queue_waiting}".format(**stats)
+                "rq_canceled={rq_canceled}, queue_waiting={queue_waiting}, "
+                "scheduled_promoted={scheduled_promoted}".format(**stats)
             )
             print("Перезапустите: python -m app worker transcript")
             return EXIT_SUCCESS

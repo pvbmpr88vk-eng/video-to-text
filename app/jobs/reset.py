@@ -6,7 +6,8 @@ from rq.job import Job as RQJob
 
 from app.jobs.models import JobStatus, JobType
 from app.jobs.store import JobStore
-from app.queue.rq_connection import get_redis, get_transcript_queue
+from app.queue.rq_connection import get_redis, get_summary_queue, get_transcript_queue
+from app.queue.scheduled import promote_scheduled_jobs
 from app.queue.tasks import SUMMARY_INFLIGHT_KEY
 
 logger = logging.getLogger(__name__)
@@ -75,4 +76,7 @@ def reset_stuck_jobs(store: JobStore | None = None) -> dict[str, int]:
     waiting = store.reconcile_queue_counter()
     stats["queue_waiting"] = waiting
     redis.set(SUMMARY_INFLIGHT_KEY, 0)
+    stats["scheduled_promoted"] = 0
+    for q in (get_transcript_queue(), get_summary_queue()):
+        stats["scheduled_promoted"] += promote_scheduled_jobs(q.name, redis)
     return stats
