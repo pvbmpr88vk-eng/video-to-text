@@ -94,6 +94,12 @@ def load_credentials() -> TelegramCredentials:
     except Exception as exc:
         raise CredentialsError(f"Invalid ALLOWED_USER_IDS: {exc}") from exc
 
+    if not allowed:
+        raise CredentialsError(
+            "ALLOWED_USER_IDS is empty — укажите хотя бы один числовой Telegram user id "
+            "(список через запятую в telegram-bot.access.txt или TELEGRAM_ALLOWED_USER_IDS)"
+        )
+
     return TelegramCredentials(
         bot_token=token,
         allowed_user_ids=allowed,

@@ -6,7 +6,7 @@ START = (
     "Привет! Отправьте видео или аудио — я сделаю транскрипт (.txt) на этом сервере.\n\n"
     "После готовности нажмите кнопку «Сделать тезисы», чтобы получить краткое саммари (локальная Ollama).\n\n"
     "Лимит файла: 20 MB (Telegram Bot API). Длинные ролики — через CLI.\n\n"
-    "Команды: /help, /status, /cancel"
+    "Команды: /help, /status, /cancel, /whoami"
 )
 
 HELP = (
@@ -23,17 +23,18 @@ HELP = (
     f"Документация: {README_STAGE4}"
 )
 
-ACCESS_DENIED = "У вас нет доступа к этому боту."
+ACCESS_DENIED = (
+    "У вас нет доступа к этому боту.\n"
+    "Ваш Telegram user id: {user_id}\n"
+    "Добавьте его в ALLOWED_USER_IDS в telegram-bot.access.txt и перезапустите бота.\n"
+    "Команда /whoami — показать id."
+)
+WHOAMI = "Ваш Telegram user id: {user_id}\n\nЕсли бот пишет «нет доступа» — добавьте это число в ALLOWED_USER_IDS."
 RATE_LIMIT = "Слишком много файлов за час. Подождите и попробуйте позже."
 BUSY = "Уже идёт обработка. Дождитесь окончания или /status."
 QUEUE_FULL = "Очередь переполнена ({max_size} задач). Попробуйте позже."
 QUEUE_POSITION = "Файл принят. В очереди (позиция {position})…"
 DOWNLOADING = "Скачиваю файл…"
-NO_IDS_CONFIGURED = (
-    "В настройках не указан ALLOWED_USER_IDS — медиа не принимаются. "
-    "Добавьте свой числовой user id в telegram-bot.access.txt (см. @userinfobot)."
-)
-
 FILE_TOO_LARGE = (
     "Файл {size_mb:.1f} MB — лимит Telegram для ботов 20 MB. "
     "Сожмите видео, отправьте аудио или используйте CLI. Загрузка по ссылке — в следующем обновлении."

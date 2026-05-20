@@ -188,7 +188,9 @@ python -m app process /path/to/video.mp4 --language ru --summarize
 cp telegram-bot.access.example.txt telegram-bot.access.txt
 ```
 
-Опционально: переменные `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ACCESS_FILE` в окружении перекрывают файл.
+В `ALLOWED_USER_IDS` — **список** числовых user id (через запятую); писать боту могут **только они**. Пустой список — бот не запустится.
+
+Переменные `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ACCESS_FILE` в окружении перекрывают файл.
 
 3. Нужна **Redis** и воркеры (этап 5); для кнопки «Сделать тезисы» — запущенная **Ollama** с моделью из этапа 3.
 
@@ -197,8 +199,12 @@ cp telegram-bot.access.example.txt telegram-bot.access.txt
 **Локально (3 процесса):**
 
 ```bash
-# 1. Redis
-brew services start redis   # или: docker compose up redis -d
+# 1. Redis (обязательно с этапа 5)
+./scripts/start-redis.sh
+# или вручную:
+#   brew install redis && brew services start redis
+#   docker compose up -d redis
+redis-cli ping   # должно ответить PONG
 
 # 2. Воркеры (отдельные терминалы)
 python -m app worker transcript
@@ -224,6 +230,16 @@ python -m app jobs cleanup --dry-run
 ```
 
 Код выхода **`7`** — нет токена / неверные credentials, или Redis недоступен.
+
+**Ошибка `Redis unavailable ... Connection refused`:** Redis не установлен или не запущен. На macOS:
+
+```bash
+brew install redis
+brew services start redis
+redis-cli ping
+```
+
+Без Homebrew: установите [Docker Desktop](https://www.docker.com/products/docker-desktop/), затем `docker compose up -d redis`.
 
 Подробнее: [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md), [ТЗ-05: параллельный backend](docs/TZ-05-parallel-backend.md).
 

@@ -87,23 +87,56 @@ def _store(context: ContextTypes.DEFAULT_TYPE) -> JobStore:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    creds: TelegramCredentials = context.application.bot_data["creds"]
-    text = M.START
-    if not creds.allowed_user_ids:
-        text += "\n\n" + M.NO_IDS_CONFIGURED
-    await update.effective_message.reply_text(text)
+    if not await _guard_access(update, context):
+        return
+    await update.effective_message.reply_text(M.START)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard_access(update, context):
+        return
     await update.effective_message.reply_text(M.HELP)
+
+
+def _telegram_user(update: Update):
+    if update.effective_user:
+        return update.effective_user
+    if update.callback_query and update.callback_query.from_user:
+        return update.callback_query.from_user
+    msg = update.effective_message
+    if msg and msg.from_user:
+        return msg.from_user
+    return None
 
 
 def _allowed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     creds: TelegramCredentials = context.application.bot_data["creds"]
-    u = update.effective_user
+    u = _telegram_user(update)
     if not u:
         return False
-    return bool(creds.allowed_user_ids) and is_allowed(u.id, creds.allowed_user_ids)
+    return is_allowed(u.id, creds.allowed_user_ids)
+
+
+async def _guard_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Return True only for user ids listed in ALLOWED_USER_IDS."""
+    if _allowed(update, context):
+        return True
+    u = _telegram_user(update)
+    denied_text = M.ACCESS_DENIED.format(user_id=u.id if u else "?")
+    logger.info("Access denied for user_id=%s", u.id if u else None)
+    if update.callback_query:
+        await update.callback_query.answer(denied_text[:200], show_alert=True)
+    elif update.effective_message:
+        await update.effective_message.reply_text(denied_text)
+    return False
+
+
+async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Always available — helps add the correct id to ALLOWED_USER_IDS."""
+    u = _telegram_user(update)
+    if not u or not update.effective_message:
+        return
+    await update.effective_message.reply_text(M.WHOAMI.format(user_id=u.id))
 
 
 def _format_job_line(job) -> str:
@@ -111,8 +144,7 @@ def _format_job_line(job) -> str:
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update, context):
-        await update.effective_message.reply_text(M.ACCESS_DENIED)
+    if not await _guard_access(update, context):
         return
     user = update.effective_user
     store = _store(context)
@@ -128,8 +160,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not _allowed(update, context):
-        await update.effective_message.reply_text(M.ACCESS_DENIED)
+    if not await _guard_access(update, context):
         return
     user = update.effective_user
     store = _store(context)
@@ -152,18 +183,13 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not message:
         return
 
-    creds: TelegramCredentials = context.application.bot_data["creds"]
     rl: MediaRateLimiter = context.application.bot_data["rate_limiter"]
     store = _store(context)
     user = update.effective_user
     if not user:
         return
 
-    if not creds.allowed_user_ids:
-        await message.reply_text(M.NO_IDS_CONFIGURED)
-        return
-    if not is_allowed(user.id, creds.allowed_user_ids):
-        await message.reply_text(M.ACCESS_DENIED)
+    if not await _guard_access(update, context):
         return
     if not rl.allow(user.id):
         await message.reply_text(M.RATE_LIMIT)
@@ -243,9 +269,7 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not user:
         return
 
-    creds: TelegramCredentials = context.application.bot_data["creds"]
-    if not creds.allowed_user_ids or not is_allowed(user.id, creds.allowed_user_ids):
-        await query.answer(M.ACCESS_DENIED, show_alert=True)
+    if not await _guard_access(update, context):
         return
 
     store = _store(context)
@@ -297,6 +321,8 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard_access(update, context):
+        return
     msg = update.effective_message
     if not msg or not msg.text:
         return
@@ -305,6 +331,8 @@ async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def on_unsupported_visual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _guard_access(update, context):
+        return
     await update.effective_message.reply_text(M.UNSUPPORTED_MEDIA)
 
 
@@ -313,6 +341,7 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 def register_handlers(application: Application) -> None:
+    application.add_handler(CommandHandler("whoami", cmd_whoami))
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("status", cmd_status))

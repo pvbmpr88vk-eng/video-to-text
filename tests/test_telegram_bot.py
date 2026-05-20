@@ -97,6 +97,16 @@ def test_load_credentials_bad_token(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         load_credentials()
 
 
+def test_load_credentials_empty_user_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    p = tmp_path / "access.txt"
+    p.write_text("BOT_TOKEN=123456:AA-abc\nALLOWED_USER_IDS=\n", encoding="utf-8")
+    monkeypatch.setenv("TELEGRAM_ACCESS_FILE", str(p))
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_ALLOWED_USER_IDS", raising=False)
+    with pytest.raises(CredentialsError, match="ALLOWED_USER_IDS is empty"):
+        load_credentials()
+
+
 def test_load_credentials_bad_user_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = tmp_path / "access.txt"
     p.write_text("BOT_TOKEN=1:a\nALLOWED_USER_IDS=abc\n", encoding="utf-8")
