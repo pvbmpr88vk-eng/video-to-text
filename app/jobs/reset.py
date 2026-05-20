@@ -7,6 +7,7 @@ from rq.job import Job as RQJob
 from app.jobs.models import JobStatus, JobType
 from app.jobs.store import JobStore
 from app.queue.rq_connection import get_redis, get_transcript_queue
+from app.queue.tasks import SUMMARY_INFLIGHT_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def reset_stuck_jobs(store: JobStore | None = None) -> dict[str, int]:
     for registry in (
         tq.started_job_registry,
         tq.deferred_job_registry,
+        tq.scheduled_job_registry,
     ):
         for rq_id in registry.get_job_ids():
             try:
@@ -72,4 +74,5 @@ def reset_stuck_jobs(store: JobStore | None = None) -> dict[str, int]:
 
     waiting = store.reconcile_queue_counter()
     stats["queue_waiting"] = waiting
+    redis.set(SUMMARY_INFLIGHT_KEY, 0)
     return stats

@@ -21,7 +21,25 @@ def _attach_rq_id(store: JobStore, job: Job, rq_job: RQJob) -> None:
     store.set_rq_job_id(job.job_id, rq_job.id)
 
 
+def _drop_stale_rq_job(job_id: str) -> None:
+    """Remove finished/scheduled RQ job so enqueue with same job_id works."""
+    redis = get_redis()
+    try:
+        rq_job = RQJob.fetch(job_id, connection=redis)
+    except Exception:
+        return
+    try:
+        rq_job.cancel()
+    except Exception:
+        pass
+    try:
+        rq_job.delete()
+    except Exception:
+        logger.debug("Could not delete stale RQ job %s", job_id, exc_info=True)
+
+
 def enqueue_transcript(store: JobStore, job: Job) -> RQJob:
+    _drop_stale_rq_job(job.job_id)
     queue = get_transcript_queue()
     rq_job = queue.enqueue(
         transcript_task,
@@ -36,6 +54,7 @@ def enqueue_transcript(store: JobStore, job: Job) -> RQJob:
 
 
 def enqueue_summary(store: JobStore, job: Job) -> RQJob:
+    _drop_stale_rq_job(job.job_id)
     queue = get_summary_queue()
     rq_job = queue.enqueue(
         summary_task,

@@ -181,8 +181,7 @@ async def _maybe_edit_status(app: Application, job: Job, track: TrackedJob | Non
     text = STATUS_TEXT.get(job.status, "Обработка…")
     if job.status == JobStatus.QUEUED:
         store: JobStore = app.bot_data["job_store"]
-        pos = store.queued_transcript_count()
-        text = M.QUEUE_POSITION.format(position=max(1, pos))
+        text = format_queue_accept_message(store)
     try:
         await app.bot.edit_message_text(
             chat_id=track.chat_id,
