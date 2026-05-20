@@ -277,3 +277,13 @@ FFmpeg и faster-whisper загружаются **только в transcript-wor
 - [ТЗ-03: саммари (локальная LLM / Ollama)](docs/TZ-03-summary.md)
 - [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md)
 - [ТЗ-05: параллельный backend (Redis + RQ)](docs/TZ-05-parallel-backend.md)
+
+## Этап 6: загрузка по ссылке (yt-dlp)
+
+В бот можно отправить **текст со ссылкой** (YouTube и другие сайты, которые поддерживает [yt-dlp](https://github.com/yt-dlp/yt-dlp)). Лимит размера на сервере — `URL_DOWNLOAD_MAX_BYTES` (по умолчанию 500 MB), не 20 MB Telegram.
+
+```bash
+pip install -r requirements.txt   # включает yt-dlp
+```
+
+Дальше тот же пайплайн: Redis + workers + `python -m app bot -v`.

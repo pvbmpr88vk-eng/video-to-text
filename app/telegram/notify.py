@@ -46,6 +46,8 @@ def _theses_keyboard(job_id: str) -> InlineKeyboardMarkup:
 
 
 def _error_message(code: str) -> str:
+    if code.startswith("url_download:"):
+        return M.URL_DOWNLOAD_FAILED.format(detail=code.removeprefix("url_download:").strip())
     if code == "no_audio":
         return M.ERR_NO_AUDIO
     if code == "ffmpeg_missing":

@@ -20,6 +20,10 @@ TELEGRAM_MESSAGE_MAX_LEN = 4096
 TELEGRAM_BOT_FILE_SIZE_LIMIT = 20_000_000
 TELEGRAM_STATUS_EDIT_MIN_SEC = 30.0
 
+# URL download (TZ-06, yt-dlp) — larger than Telegram 20 MB limit
+URL_DOWNLOAD_MAX_BYTES = int(os.environ.get("URL_DOWNLOAD_MAX_BYTES", str(500 * 1024 * 1024)))
+URL_DOWNLOAD_TIMEOUT_SEC = int(os.environ.get("URL_DOWNLOAD_TIMEOUT_SEC", "600"))
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL_DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
 OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "8192"))

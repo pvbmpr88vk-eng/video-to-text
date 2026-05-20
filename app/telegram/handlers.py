@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import uuid
@@ -20,7 +21,9 @@ from app.config import (
     MAX_QUEUE_SIZE,
     TELEGRAM_BOT_FILE_SIZE_LIMIT,
     TELEGRAM_DEFAULT_LANGUAGE,
+    URL_DOWNLOAD_MAX_BYTES,
 )
+from app.download.url import UrlDownloadError, download_media_url, extract_url
 from app.jobs.models import JobStatus, JobType
 from app.jobs.paths import ensure_job_dirs, job_inbox_dir
 from app.jobs.store import JobStore
@@ -36,9 +39,6 @@ logger = logging.getLogger(__name__)
 ALLOWED_SUFFIXES = frozenset(
     {".mp4", ".mov", ".mkv", ".webm", ".m4a", ".wav", ".mp3", ".ogg", ".opus"}
 )
-URL_RE = re.compile(r"https?://", re.I)
-
-
 def _document_allowed(doc) -> bool:
     name = (doc.file_name or "").lower()
     mime = (doc.mime_type or "").lower()
@@ -326,8 +326,64 @@ async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     msg = update.effective_message
     if not msg or not msg.text:
         return
-    if URL_RE.search(msg.text):
-        await msg.reply_text(M.URL_NOT_SUPPORTED)
+    url = extract_url(msg.text)
+    if not url:
+        return
+
+    rl: MediaRateLimiter = context.application.bot_data["rate_limiter"]
+    store = _store(context)
+    user = update.effective_user
+    if not user:
+        return
+    if not rl.allow(user.id):
+        await msg.reply_text(M.RATE_LIMIT)
+        return
+    if store.queue_full():
+        await msg.reply_text(M.QUEUE_FULL.format(max_size=MAX_QUEUE_SIZE))
+        return
+
+    job_id = str(uuid.uuid4())
+    ensure_job_dirs(job_id)
+    inbox_dir = job_inbox_dir(job_id)
+
+    status_msg = await msg.reply_text(M.URL_DOWNLOADING)
+    job = store.create(
+        job_id=job_id,
+        job_type=JobType.TRANSCRIPT,
+        user_id=user.id,
+        chat_id=msg.chat_id,
+        language=TELEGRAM_DEFAULT_LANGUAGE,
+        message_id=msg.message_id,
+        status_message_id=status_msg.message_id,
+    )
+    store.update_status(job_id, JobStatus.DOWNLOADING, publish=True)
+
+    try:
+        path = await asyncio.to_thread(
+            download_media_url,
+            url,
+            inbox_dir,
+            max_bytes=URL_DOWNLOAD_MAX_BYTES,
+        )
+    except UrlDownloadError as exc:
+        logger.warning("URL download failed for %s: %s", url[:80], exc)
+        store.update_status(job_id, JobStatus.FAILED, error=f"url_download: {exc}")
+        await msg.reply_text(M.URL_DOWNLOAD_FAILED.format(detail=exc))
+        return
+
+    store.update_status(job_id, JobStatus.QUEUED, inbox_path=str(path), publish=True)
+    job = store.get(job_id)
+    if job:
+        enqueue_transcript(store, job)
+    position = store.queued_transcript_count()
+    await status_msg.edit_text(M.QUEUE_POSITION.format(position=max(1, position)))
+    track_job(
+        context.application,
+        job_id=job_id,
+        chat_id=msg.chat_id,
+        status_message_id=status_msg.message_id,
+        reply_to_message_id=msg.message_id,
+    )
 
 
 async def on_unsupported_visual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
