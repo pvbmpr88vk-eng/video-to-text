@@ -33,7 +33,12 @@ from app.telegram.auth import MediaRateLimiter, is_allowed
 from app.telegram.credentials import TelegramCredentials
 from app.telegram.jobs import CALLBACK_THESES_PREFIX, parse_theses_callback
 from app.telegram.idempotency import claim_inbound_message
-from app.telegram.notify import track_job, track_theses_message
+from app.telegram.notify import (
+    ensure_summary_delivery,
+    track_job,
+    track_theses_message,
+    try_deliver_summary,
+)
 from app.telegram.queue_msg import format_queue_accept_message
 
 logger = logging.getLogger(__name__)
@@ -303,18 +308,49 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
         return
 
+    redis = context.application.bot_data["redis"]
     existing = store.find_summary_for_parent(parent_job_id)
-    if existing:
-        if existing.status in (JobStatus.QUEUED, JobStatus.SUMMARY):
-            await query.answer("Тезисы уже готовятся…", show_alert=True)
-            return
-        if existing.status == JobStatus.DONE:
+    if existing and existing.status == JobStatus.DONE:
+        from app.jobs.delivery import was_telegram_delivered
+
+        if was_telegram_delivered(redis, existing.job_id, "summary"):
             await query.answer("Тезисы уже отправлены в чат.", show_alert=True)
             return
+        await query.answer("Отправляю тезисы…")
+        if await try_deliver_summary(context.application, existing.job_id):
+            return
+        ensure_summary_delivery(context.application, existing.job_id)
+        return
 
-    await query.answer(M.SUMMARY_STARTED)
     chat_id = query.message.chat_id if query.message else user.id
-    status_msg = await context.bot.send_message(chat_id, M.SUMMARY_STARTED)
+    if existing and existing.status in (JobStatus.QUEUED, JobStatus.SUMMARY, JobStatus.FAILED):
+        from app.queue.enqueue import enqueue_summary
+
+        if existing.status == JobStatus.SUMMARY:
+            store.update_status(existing.job_id, JobStatus.QUEUED, error=None)
+        elif existing.status == JobStatus.FAILED:
+            store.update_status(existing.job_id, JobStatus.QUEUED, error=None)
+        if query.message:
+            track_theses_message(
+                context.application, parent_job_id, query.message.message_id
+            )
+        parent_track = context.application.bot_data.get("tracked_jobs", {}).get(parent_job_id)
+        track_job(
+            context.application,
+            job_id=existing.job_id,
+            chat_id=chat_id,
+            status_message_id=existing.status_message_id,
+        )
+        if parent_track and parent_track.theses_message_id:
+            summary_track = context.application.bot_data["tracked_jobs"].get(existing.job_id)
+            if summary_track:
+                summary_track.theses_message_id = parent_track.theses_message_id
+        enqueue_summary(store, store.get(existing.job_id) or existing)
+        ensure_summary_delivery(context.application, existing.job_id)
+        await query.answer("Тезисы в очереди…")
+        return
+
+    await query.answer("Готовлю тезисы…")
 
     summary_job_id = str(uuid.uuid4())
     ensure_job_dirs(summary_job_id)
@@ -324,10 +360,9 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_id=user.id,
         chat_id=chat_id,
         language=parent.language,
-        status_message_id=status_msg.message_id,
+        status_message_id=None,
         parent_job_id=parent_job_id,
     )
-    enqueue_summary(store, summary_job)
 
     if query.message:
         track_theses_message(context.application, parent_job_id, query.message.message_id)
@@ -337,12 +372,16 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.application,
         job_id=summary_job_id,
         chat_id=chat_id,
-        status_message_id=status_msg.message_id,
+        status_message_id=None,
     )
     if parent_track and parent_track.theses_message_id:
         summary_track = context.application.bot_data["tracked_jobs"].get(summary_job_id)
         if summary_track:
             summary_track.theses_message_id = parent_track.theses_message_id
+
+    enqueue_summary(store, summary_job)
+    ensure_summary_delivery(context.application, summary_job_id)
+    await try_deliver_summary(context.application, summary_job_id)
 
 
 async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

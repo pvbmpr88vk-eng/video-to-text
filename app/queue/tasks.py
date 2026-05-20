@@ -30,7 +30,7 @@ from app.summary.summarizer import summarize_transcript
 
 logger = logging.getLogger(__name__)
 
-SUMMARY_INFLIGHT_KEY = "summary:inflight"
+SUMMARY_INFLIGHT_KEY = "summary:inflight"  # legacy; reconciled in reset_stuck / worker start
 
 
 def _store() -> JobStore:
@@ -128,7 +128,6 @@ def run_transcript_job(job_id: str) -> None:
 
 
 def run_summary_job(job_id: str) -> None:
-    redis = get_redis()
     store = _store()
     job = store.get(job_id)
     if not job:
@@ -151,9 +150,9 @@ def run_summary_job(job_id: str) -> None:
         _fail(store, job_id, "transcript file not found")
         return
 
-    inflight = redis.incr(SUMMARY_INFLIGHT_KEY)
-    if inflight > MAX_CONCURRENT_SUMMARIES:
-        redis.decr(SUMMARY_INFLIGHT_KEY)
+    active = store.count_active_summaries()
+    job = store.get(job_id)
+    if job and job.status != JobStatus.SUMMARY and active >= MAX_CONCURRENT_SUMMARIES:
         raise RuntimeError(
             f"summary concurrency limit ({MAX_CONCURRENT_SUMMARIES}) reached; retry later"
         )
@@ -191,8 +190,6 @@ def run_summary_job(job_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unexpected error in summary job %s", job_id)
         _fail(store, job_id, str(exc))
-    finally:
-        redis.decr(SUMMARY_INFLIGHT_KEY)
 
 
 def transcript_task(job_id: str) -> None:

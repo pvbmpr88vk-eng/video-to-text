@@ -54,13 +54,25 @@ def test_format_summary_for_chat_all_theses() -> None:
     payload = {
         "summary": "Кратко.",
         "theses": [f"Тезис {i}" for i in range(20)],
-        "action_items": [{"text": "Сделать X"}],
     }
     text = format_summary_for_chat(payload)
     assert "… ещё" not in text
     assert "summary.md" not in text
     assert "20. Тезис 19" in text
     assert "1. Тезис 0" in text
+    assert "Действия" not in text
+
+
+def test_format_summary_ignores_legacy_action_items() -> None:
+    text = format_summary_for_chat(
+        {
+            "summary": "Кратко.",
+            "theses": ["Один"],
+            "action_items": [{"text": "Сделать X"}],
+        }
+    )
+    assert "Действия" not in text
+    assert "Сделать X" not in text
 
 
 def test_load_credentials_from_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

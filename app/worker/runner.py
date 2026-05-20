@@ -59,6 +59,12 @@ def run_worker(kind: str, *, verbose: bool = False) -> None:
 
     for name in queue_names:
         promote_scheduled_jobs(name, conn)
+    if kind == "summary":
+        from app.jobs.store import JobStore
+        from app.queue.tasks import SUMMARY_INFLIGHT_KEY
+
+        JobStore(conn).reconcile_queue_counter()
+        conn.set(SUMMARY_INFLIGHT_KEY, 0)
 
     # fork() + ML/Ollama/ObjC → SIGABRT on macOS; run jobs in-process locally.
     worker_cls = SimpleWorker if sys.platform == "darwin" else Worker

@@ -501,7 +501,9 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "Reset: processing_failed={processing_failed}, waiting_failed={waiting_failed}, "
                 "rq_canceled={rq_canceled}, queue_waiting={queue_waiting}, "
-                "scheduled_promoted={scheduled_promoted}".format(**stats)
+                "scheduled_promoted={scheduled_promoted}, summary_requeued={summary_requeued}".format(
+                    **stats
+                )
             )
             print("Перезапустите: python -m app worker transcript")
             return EXIT_SUCCESS

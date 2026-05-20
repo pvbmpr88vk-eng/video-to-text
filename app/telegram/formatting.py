@@ -48,12 +48,11 @@ def split_telegram_message(text: str, limit: int = TELEGRAM_MESSAGE_MAX_LEN) -> 
 
 
 def format_summary_for_chat(payload: dict[str, Any]) -> str:
-    """Plain-text summary for chat: summary + all theses + action lines."""
+    """Plain-text summary for chat: пересказ и тезисы."""
     summary = (payload.get("summary") or "").strip()
     theses = payload.get("theses") or []
     if not isinstance(theses, list):
         theses = []
-    actions = payload.get("action_items") or []
 
     lines: list[str] = ["📋 Краткий пересказ", "", summary, "", "📌 Тезисы", ""]
     n = 0
@@ -62,15 +61,5 @@ def format_summary_for_chat(payload: dict[str, Any]) -> str:
         if t:
             n += 1
             lines.append(f"{n}. {t}")
-
-    if actions:
-        lines.extend(["", "✅ Действия", ""])
-        for a in actions:
-            if isinstance(a, dict):
-                txt = (a.get("text") or "").strip()
-            else:
-                txt = str(a).strip()
-            if txt:
-                lines.append(f"• [ ] {txt}")
 
     return "\n".join(lines).strip()

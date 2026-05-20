@@ -11,6 +11,7 @@ from app.config import SUMMARY_CHUNK_CHAR_LIMIT, SUMMARY_CHUNK_OVERLAP
 from app.summary.chunking import split_transcript_text
 from app.summary.exceptions import EmptyTranscriptError, SummaryConfigError
 from app.summary.ollama_client import OllamaClient
+from app.summary.grounding import looks_hallucinated, literal_fallback_summary
 from app.summary.summarizer import summarize_transcript
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -74,6 +75,38 @@ def test_reference_txt_matches_json_length(reference_transcript: dict):
     assert abs(len(txt) - len(reference_transcript["text"])) < 500
 
 
+def test_hallucinated_meeting_summary_detected():
+    transcript = "Раз, два, три, четыре, пять, шесть, семь."
+    bad = {
+        "summary": "Созвон проходил в формальном режиме.",
+        "theses": ["Обсуждались текущие проекты"],
+    }
+    assert looks_hallucinated(transcript, bad) is True
+    good = literal_fallback_summary(transcript)
+    assert looks_hallucinated(transcript, good) is False
+    assert "семь" in good["summary"].lower() or "семь" in good["theses"][0].lower()
+
+
+@patch("app.summary.summarizer.OllamaClient")
+def test_counting_transcript_uses_literal_fallback(mock_client_cls, tmp_path):
+    mock_client = MagicMock()
+    mock_client.host = "http://127.0.0.1:11434"
+    mock_client_cls.return_value = mock_client
+    mock_client.ensure_ready.return_value = None
+    mock_client.chat_json.return_value = {
+        "summary": "Созвон проходил в формальном режиме.",
+        "theses": ["Обсуждались проекты"],
+    }
+
+    source = FIXTURES / "trivial_counting.json"
+    result = summarize_transcript(source, output_dir=tmp_path / "out", model="qwen2.5:3b-instruct")
+    payload = json.loads(result.theses_path.read_text(encoding="utf-8"))
+    blob = (payload["summary"] + " " + " ".join(payload["theses"])).lower()
+    assert "созвон" not in blob or "раз" in blob
+    assert "action_items" not in payload
+    assert "три" in blob or "семь" in blob
+
+
 def test_summarize_empty_transcript(tmp_path):
     path = tmp_path / "empty.json"
     path.write_text(json.dumps({"text": "  "}), encoding="utf-8")
@@ -88,9 +121,12 @@ def test_summarize_short_fixture(mock_client_cls, tmp_path):
     mock_client_cls.return_value = mock_client
     mock_client.ensure_ready.return_value = None
     mock_client.chat_json.return_value = {
-        "summary": "Краткий итог созвона.",
-        "theses": ["Тезис один", "Тезис два"],
-        "action_items": [],
+        "summary": "Заключительный созвон: Dashboard, отчёт ДДС, созвон с Кристиной.",
+        "theses": [
+            "Заключительный созвон",
+            "Обсудили Dashboard и отчёт ДДС",
+            "Нужен созвон с Кристиной на следующей неделе",
+        ],
         "quotes": [],
     }
 
@@ -127,9 +163,6 @@ def test_summarize_reference_transcript_mock(
                 "Dashboard обсудят с Кристиной",
                 "Вопрос прозрачности личного дохода",
                 "ABC-анализ сложно применять к разнородным услугам",
-            ],
-            "action_items": [
-                {"text": "Созвон по Dashboard с Кристиной", "assignee": None, "due": None}
             ],
             "quotes": [],
         }

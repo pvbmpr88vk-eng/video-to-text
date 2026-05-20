@@ -11,7 +11,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 
 from app.config import MAX_QUEUE_SIZE, TELEGRAM_STATUS_EDIT_MIN_SEC
-from app.jobs.delivery import claim_telegram_delivery
+from app.jobs.delivery import (
+    claim_telegram_delivery,
+    clear_telegram_delivery,
+    mark_telegram_delivered,
+    was_telegram_delivered,
+)
 from app.jobs.events import JOB_EVENTS_CHANNEL
 from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.store import JobStore
@@ -150,21 +155,19 @@ async def _handle_job_event(app: Application, job_id: str) -> None:
 
     tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
     track = tracked.get(job_id)
-    if not track and job.parent_job_id:
+    if not track and job.parent_job_id and job.job_type != JobType.SUMMARY:
         track = tracked.get(job.parent_job_id)
 
     if job.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING, JobStatus.EXTRACT, JobStatus.STT, JobStatus.SUMMARY):
-        await _maybe_edit_status(app, job, track)
+        if job.job_type != JobType.SUMMARY:
+            await _maybe_edit_status(app, job, track)
         return
 
     if job.status == JobStatus.DONE:
         if job.job_type == JobType.TRANSCRIPT:
             await _deliver_transcript(app, job, track)
         elif job.job_type == JobType.SUMMARY:
-            await _deliver_summary(app, job, track)
-        _untrack(app, job_id)
-        if job.parent_job_id:
-            _untrack(app, job.parent_job_id)
+            await try_deliver_summary(app, job.job_id)
         return
 
     if job.status in (JobStatus.FAILED, JobStatus.TIMEOUT, JobStatus.CANCELLED):
@@ -199,7 +202,7 @@ async def _maybe_edit_status(app: Application, job: Job, track: TrackedJob | Non
 
 async def _deliver_transcript(app: Application, job: Job, track: TrackedJob | None) -> None:
     redis = app.bot_data["redis"]
-    if not claim_telegram_delivery(redis, job.job_id, "transcript"):
+    if was_telegram_delivered(redis, job.job_id, "transcript"):
         logger.info("Skip duplicate transcript delivery for job %s", job.job_id)
         return
     chat_id = track.chat_id if track else job.chat_id
@@ -211,33 +214,43 @@ async def _deliver_transcript(app: Application, job: Job, track: TrackedJob | No
 
     txt_path = Path(job.transcript_txt) if job.transcript_txt else None
     if txt_path and txt_path.is_file():
-        await app.bot.send_document(
+        doc = await app.bot.send_document(
             chat_id=chat_id,
             document=str(txt_path.resolve()),
-            caption="Транскрипт (.txt)",
+            caption=M.TRANSCRIPT_CAPTION,
+            reply_markup=_theses_keyboard(job.job_id),
             reply_to_message_id=track.reply_to_message_id if track else job.message_id,
         )
-        mins = job.duration_sec / 60.0 if job.duration_sec else 0.0
-        stats = M.TRANSCRIPT_CAPTION.format(
-            mins=mins,
-            model=job.stt_model or "whisper",
-            proc_min=job.processing_sec / 60.0,
-        )
-        msg = await app.bot.send_message(chat_id, stats, reply_markup=_theses_keyboard(job.job_id))
-        track_theses_message(app, job.job_id, msg.message_id)
+        track_theses_message(app, job.job_id, doc.message_id)
+        mark_telegram_delivered(redis, job.job_id, "transcript")
     else:
         await app.bot.send_message(chat_id, "Транскрипт не найден на диске.")
+        mark_telegram_delivered(redis, job.job_id, "transcript")
 
 
-async def _deliver_summary(app: Application, job: Job, track: TrackedJob | None) -> None:
-    redis = app.bot_data["redis"]
-    if not claim_telegram_delivery(redis, job.job_id, "summary"):
-        logger.info("Skip duplicate summary delivery for job %s", job.job_id)
-        return
+def _summary_track(app: Application, job: Job, track: TrackedJob | None) -> TrackedJob | None:
+    if track:
+        return track
+    tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
+    if job.parent_job_id:
+        return tracked.get(job.parent_job_id)
+    return None
+
+
+async def _send_summary_messages(
+    app: Application, job: Job, track: TrackedJob | None
+) -> None:
     chat_id = track.chat_id if track else job.chat_id
     parent_id = job.parent_job_id or job.job_id
     tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
     parent_track = tracked.get(parent_id, track)
+
+    status_message_id = (track.status_message_id if track else None) or job.status_message_id
+    if status_message_id:
+        try:
+            await app.bot.delete_message(chat_id=chat_id, message_id=status_message_id)
+        except Exception:
+            logger.debug("Could not delete summary status message", exc_info=True)
 
     if parent_track and parent_track.theses_message_id:
         try:
@@ -250,25 +263,89 @@ async def _deliver_summary(app: Application, job: Job, track: TrackedJob | None)
             logger.debug("Could not remove inline keyboard", exc_info=True)
 
     theses_path = Path(job.theses_json) if job.theses_json else None
-    if theses_path and theses_path.is_file():
-        payload = json.loads(theses_path.read_text(encoding="utf-8"))
-        body = format_summary_for_chat(payload)
-        for part in split_telegram_message(body):
-            await app.bot.send_message(chat_id, part)
+    if not theses_path or not theses_path.is_file():
+        raise FileNotFoundError("theses file missing")
+
+    payload = json.loads(theses_path.read_text(encoding="utf-8"))
+    body = format_summary_for_chat(payload)
+    reply_to = parent_track.theses_message_id if parent_track else None
+    for i, part in enumerate(split_telegram_message(body)):
         await app.bot.send_message(
             chat_id,
-            M.SUMMARY_DONE.format(
-                proc_min=job.processing_sec / 60.0,
-                model=job.llm_model or "ollama",
-            ),
+            part,
+            reply_to_message_id=reply_to if i == 0 else None,
         )
-    else:
-        await app.bot.send_message(chat_id, M.ERR_SUMMARY.format(detail="theses file missing"))
+
+
+async def try_deliver_summary(app: Application, job_id: str) -> bool:
+    """Deliver summary to chat once. Returns True if already sent or sent now."""
+    redis = app.bot_data["redis"]
+    if was_telegram_delivered(redis, job_id, "summary"):
+        return True
+
+    store: JobStore = app.bot_data["job_store"]
+    job = store.get(job_id)
+    if not job or job.job_type != JobType.SUMMARY or job.status != JobStatus.DONE:
+        return False
+
+    if not claim_telegram_delivery(redis, job_id, "summary"):
+        return was_telegram_delivered(redis, job_id, "summary")
+
+    tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
+    track = tracked.get(job_id) or _summary_track(app, job, None)
+    try:
+        await _send_summary_messages(app, job, track)
+    except Exception:
+        clear_telegram_delivery(redis, job_id, "summary")
+        logger.exception("Summary delivery failed for job %s", job_id)
+        chat_id = track.chat_id if track else job.chat_id
+        try:
+            await app.bot.send_message(
+                chat_id,
+                M.ERR_SUMMARY.format(detail="не удалось отправить тезисы"),
+            )
+        except Exception:
+            logger.debug("Could not send summary delivery error", exc_info=True)
+        return False
+
+    mark_telegram_delivered(redis, job_id, "summary")
+    _untrack(app, job_id)
+    if job.parent_job_id:
+        _untrack(app, job.parent_job_id)
+    return True
+
+
+async def schedule_summary_delivery(app: Application, job_id: str) -> None:
+    """Poll until summary is ready and deliver (covers missed pubsub events)."""
+    store: JobStore = app.bot_data["job_store"]
+    for _ in range(600):
+        if was_telegram_delivered(app.bot_data["redis"], job_id, "summary"):
+            return
+        job = store.get(job_id)
+        if not job:
+            return
+        if job.status == JobStatus.DONE:
+            if await try_deliver_summary(app, job_id):
+                return
+        elif job.status in (JobStatus.FAILED, JobStatus.TIMEOUT, JobStatus.CANCELLED):
+            await _handle_job_event(app, job_id)
+            return
+        await asyncio.sleep(1)
+
+
+def ensure_summary_delivery(app: Application, job_id: str) -> None:
+    """Start background watcher after user requests theses."""
+    app.bot_data.setdefault("summary_delivery_tasks", {})
+    tasks: dict[str, asyncio.Task] = app.bot_data["summary_delivery_tasks"]
+    old = tasks.pop(job_id, None)
+    if old and not old.done():
+        old.cancel()
+    tasks[job_id] = asyncio.create_task(schedule_summary_delivery(app, job_id))
 
 
 async def _deliver_failure(app: Application, job: Job, track: TrackedJob | None) -> None:
     redis = app.bot_data["redis"]
-    if not claim_telegram_delivery(redis, job.job_id, "failure"):
+    if was_telegram_delivered(redis, job.job_id, "failure"):
         logger.info("Skip duplicate failure delivery for job %s", job.job_id)
         return
     chat_id = track.chat_id if track else job.chat_id
@@ -282,7 +359,9 @@ async def _deliver_failure(app: Application, job: Job, track: TrackedJob | None)
                 message_id=status_message_id,
                 text=text,
             )
+            mark_telegram_delivered(redis, job.job_id, "failure")
             return
         except Exception:
             logger.debug("Could not edit failure status", exc_info=True)
     await app.bot.send_message(chat_id, text)
+    mark_telegram_delivered(redis, job.job_id, "failure")

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import fakeredis
 
-from app.jobs.delivery import claim_telegram_delivery
+from app.jobs.delivery import (
+    claim_telegram_delivery,
+    mark_telegram_delivered,
+    was_telegram_delivered,
+)
 from app.jobs.models import JobStatus, JobType
 from app.jobs.store import JobStore
 
@@ -11,6 +15,13 @@ def test_claim_telegram_delivery_once():
     redis = fakeredis.FakeRedis(decode_responses=False)
     assert claim_telegram_delivery(redis, "j1", "transcript") is True
     assert claim_telegram_delivery(redis, "j1", "transcript") is False
+
+
+def test_mark_and_was_delivered():
+    redis = fakeredis.FakeRedis(decode_responses=False)
+    assert was_telegram_delivered(redis, "j1", "summary") is False
+    mark_telegram_delivered(redis, "j1", "summary")
+    assert was_telegram_delivered(redis, "j1", "summary") is True
 
 
 def test_find_summary_for_parent():

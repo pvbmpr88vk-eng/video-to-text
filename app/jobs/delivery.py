@@ -12,6 +12,25 @@ def _key(job_id: str, kind: str) -> str:
     return f"{_DELIVERED_PREFIX}{job_id}:{kind}"
 
 
+def was_telegram_delivered(redis: Redis, job_id: str, kind: str) -> bool:
+    return bool(redis.get(_key(job_id, kind)))
+
+
+def clear_telegram_delivery(redis: Redis, job_id: str, kind: str) -> None:
+    redis.delete(_key(job_id, kind))
+
+
+def mark_telegram_delivered(
+    redis: Redis,
+    job_id: str,
+    kind: str,
+    *,
+    ttl_sec: int = _DEFAULT_TTL_SEC,
+) -> None:
+    """Call only after the user-visible Telegram send succeeded."""
+    redis.set(_key(job_id, kind), "1", ex=ttl_sec)
+
+
 def claim_telegram_delivery(
     redis: Redis,
     job_id: str,

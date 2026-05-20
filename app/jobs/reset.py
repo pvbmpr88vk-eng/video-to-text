@@ -20,7 +20,12 @@ def reset_stuck_jobs(store: JobStore | None = None) -> dict[str, int]:
     """
     redis = get_redis()
     store = store or JobStore(redis)
-    stats = {"processing_failed": 0, "waiting_failed": 0, "rq_canceled": 0}
+    stats = {
+        "processing_failed": 0,
+        "waiting_failed": 0,
+        "rq_canceled": 0,
+        "summary_requeued": 0,
+    }
 
     for key in redis.scan_iter(match="job:*"):
         raw = redis.get(key)
@@ -34,6 +39,14 @@ def reset_stuck_jobs(store: JobStore | None = None) -> dict[str, int]:
 
             job = Job.from_dict(json.loads(raw))
         except Exception:
+            continue
+        if job.job_type == JobType.SUMMARY and job.status == JobStatus.SUMMARY:
+            store.update_status(
+                job.job_id,
+                JobStatus.QUEUED,
+                error=None,
+            )
+            stats["summary_requeued"] += 1
             continue
         if job.job_type != JobType.TRANSCRIPT:
             continue
@@ -79,4 +92,27 @@ def reset_stuck_jobs(store: JobStore | None = None) -> dict[str, int]:
     stats["scheduled_promoted"] = 0
     for q in (get_transcript_queue(), get_summary_queue()):
         stats["scheduled_promoted"] += promote_scheduled_jobs(q.name, redis)
+
+    from app.queue.enqueue import enqueue_summary
+
+    for key in redis.scan_iter(match="job:*"):
+        raw = redis.get(key)
+        if not raw:
+            continue
+        if isinstance(raw, bytes):
+            raw = raw.decode()
+        try:
+            import json
+            from app.jobs.models import Job
+
+            job = Job.from_dict(json.loads(raw))
+        except Exception:
+            continue
+        if job.job_type == JobType.SUMMARY and job.status == JobStatus.QUEUED:
+            try:
+                enqueue_summary(store, job)
+                stats["summary_requeued"] += 1
+            except Exception:
+                logger.debug("Could not re-enqueue summary %s", job.job_id, exc_info=True)
+
     return stats

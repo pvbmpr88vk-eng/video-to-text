@@ -140,6 +140,23 @@ class JobStore:
         val = self._redis.get(QUEUE_COUNTER_KEY)
         return max(0, int(val or 0))
 
+    def count_active_summaries(self) -> int:
+        """Jobs currently in SUMMARY status (replaces drift-prone Redis inflight counter)."""
+        count = 0
+        for key in self._redis.scan_iter(match=f"{JOB_KEY_PREFIX}*"):
+            raw = self._redis.get(key)
+            if not raw:
+                continue
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            try:
+                job = Job.from_dict(json.loads(raw))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+            if job.job_type == JobType.SUMMARY and job.status == JobStatus.SUMMARY:
+                count += 1
+        return count
+
     def count_processing_transcripts(self) -> int:
         count = 0
         for key in self._redis.scan_iter(match=f"{JOB_KEY_PREFIX}*"):

@@ -17,8 +17,10 @@ from app.config import (
 )
 from app.summary.chunking import split_transcript_text
 from app.summary.exceptions import EmptyTranscriptError, SummaryAPIError
+from app.summary.grounding import literal_fallback_summary, looks_hallucinated
 from app.summary.ollama_client import OllamaClient
 from app.summary.prompts import (
+    GROUNDING_RETRY_SUFFIX,
     MAP_SYSTEM_RU,
     REDUCE_SYSTEM_RU,
     map_user_message,
@@ -54,18 +56,73 @@ def _format_summary_md(payload: dict[str, Any]) -> str:
     for item in payload.get("theses") or []:
         if str(item).strip():
             lines.append(f"- {str(item).strip()}")
-    actions = payload.get("action_items") or []
-    if actions:
-        lines.extend(["", "# Действия (если есть)", ""])
-        for action in actions:
-            if isinstance(action, dict):
-                text = (action.get("text") or "").strip()
-            else:
-                text = str(action).strip()
-            if text:
-                lines.append(f"- [ ] {text}")
     lines.append("")
     return "\n".join(lines)
+
+
+def _map_result_view(data: dict[str, Any]) -> dict[str, Any]:
+    theses = data.get("partial_theses") or []
+    if not isinstance(theses, list):
+        theses = [str(theses)]
+    return {
+        "summary": str(data.get("partial_summary") or "").strip(),
+        "theses": [str(t).strip() for t in theses if str(t).strip()],
+    }
+
+
+def _map_chunk_with_grounding(
+    client: OllamaClient,
+    *,
+    chunk_text: str,
+    user: str,
+    model: str,
+    chunk_label: str,
+) -> dict[str, Any]:
+    data = client.chat_json(system=MAP_SYSTEM_RU, user=user, model=model)
+    if not looks_hallucinated(chunk_text, _map_result_view(data)):
+        return data
+
+    logger.warning("%s looks ungrounded, retrying map", chunk_label)
+    retry = client.chat_json(
+        system=MAP_SYSTEM_RU,
+        user=user + GROUNDING_RETRY_SUFFIX,
+        model=model,
+    )
+    if not looks_hallucinated(chunk_text, _map_result_view(retry)):
+        return retry
+
+    logger.warning("%s still ungrounded; using literal map fallback", chunk_label)
+    preview = chunk_text.strip()
+    thesis = preview if len(preview) <= 240 else preview[:237] + "..."
+    return {"partial_summary": preview[:500], "partial_theses": [thesis] if thesis else []}
+
+
+def _finalize_with_grounding(
+    client: OllamaClient,
+    *,
+    transcript: str,
+    system: str,
+    user: str,
+    model: str,
+) -> dict[str, Any]:
+    data = client.chat_json(system=system, user=user, model=model)
+    result = _normalize_final(data)
+    if not looks_hallucinated(transcript, result):
+        return result
+
+    logger.warning(
+        "Summary looks ungrounded (len=%d), retrying with stricter prompt",
+        len(transcript),
+    )
+    retry_user = user + GROUNDING_RETRY_SUFFIX
+    retry = _normalize_final(
+        client.chat_json(system=system, user=retry_user, model=model)
+    )
+    if not looks_hallucinated(transcript, retry):
+        return retry
+
+    logger.warning("Summary still ungrounded; using literal fallback")
+    return literal_fallback_summary(transcript)
 
 
 def _run_map_reduce(
@@ -85,20 +142,23 @@ def _run_map_reduce(
     logger.info("Summary map-reduce: %d chunk(s), model=%s", total, model)
 
     if total == 1:
-        data = client.chat_json(
+        return _finalize_with_grounding(
+            client,
+            transcript=text,
             system=REDUCE_SYSTEM_RU,
             user=f"Полный транскрипт:\n\n{chunks[0].text}",
             model=model,
         )
-        return _normalize_final(data)
 
     partials: list[str] = []
     for chunk in chunks:
         logger.info("Map chunk %d/%d", chunk.index + 1, total)
-        part = client.chat_json(
-            system=MAP_SYSTEM_RU,
+        part = _map_chunk_with_grounding(
+            client,
+            chunk_text=chunk.text,
             user=map_user_message(chunk.text, chunk.index + 1, total),
             model=model,
+            chunk_label=f"Map chunk {chunk.index + 1}/{total}",
         )
         partials.append(
             json.dumps(
@@ -111,12 +171,13 @@ def _run_map_reduce(
         )
 
     logger.info("Reduce step")
-    final = client.chat_json(
+    return _finalize_with_grounding(
+        client,
+        transcript=text,
         system=REDUCE_SYSTEM_RU,
         user=reduce_user_message("\n\n".join(partials)),
         model=model,
     )
-    return _normalize_final(final)
 
 
 def _normalize_final(data: dict[str, Any]) -> dict[str, Any]:
@@ -127,7 +188,6 @@ def _normalize_final(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "summary": str(summary).strip(),
         "theses": [str(t).strip() for t in theses if str(t).strip()],
-        "action_items": data.get("action_items") or [],
         "quotes": data.get("quotes") or [],
     }
 
@@ -179,7 +239,6 @@ def summarize_transcript(
     theses_payload = {
         "summary": final["summary"],
         "theses": final["theses"],
-        "action_items": final["action_items"],
         "quotes": final["quotes"],
         "language": lang,
         "source_transcript": str(source),

@@ -1,0 +1,9 @@
+{
+  "text": "Раз, два, три, четыре, пять, шесть, семь.",
+  "language": "ru",
+  "duration_sec": 3.0,
+  "model": "small",
+  "source_path": "/tmp/voice.wav",
+  "created_at": "2026-05-20T18:48:57+00:00",
+  "segments": []
+}
