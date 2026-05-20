@@ -89,13 +89,17 @@ def _store(context: ContextTypes.DEFAULT_TYPE) -> JobStore:
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guard_access(update, context):
         return
-    await update.effective_message.reply_text(M.START)
+    msg = update.effective_message
+    if msg:
+        await msg.reply_text(M.START)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guard_access(update, context):
         return
-    await update.effective_message.reply_text(M.HELP)
+    msg = update.effective_message
+    if msg:
+        await msg.reply_text(M.HELP)
 
 
 def _telegram_user(update: Update):
@@ -125,7 +129,7 @@ async def _guard_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> b
     denied_text = M.ACCESS_DENIED.format(user_id=u.id if u else "?")
     logger.info("Access denied for user_id=%s", u.id if u else None)
     if update.callback_query:
-        await update.callback_query.answer(denied_text[:200], show_alert=True)
+        await update.callback_query.answer(M.ACCESS_DENIED_ALERT, show_alert=True)
     elif update.effective_message:
         await update.effective_message.reply_text(denied_text)
     return False
@@ -278,7 +282,7 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
         return
     if parent.user_id != user.id:
-        await query.answer(M.ACCESS_DENIED, show_alert=True)
+        await query.answer(M.ACCESS_DENIED_ALERT, show_alert=True)
         return
     if parent.status != JobStatus.DONE or not parent.transcript_json:
         await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)

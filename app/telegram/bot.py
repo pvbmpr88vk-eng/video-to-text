@@ -26,6 +26,12 @@ def _ollama_reachable() -> bool:
 
 async def _post_init(application) -> None:
     if JOB_QUEUE_ENABLED:
+        store: JobStore = application.bot_data["job_store"]
+        stale = store.fail_stale_waiting_jobs()
+        waiting = store.reconcile_queue_counter()
+        if stale:
+            logger.warning("Marked %s stale transcript job(s) as failed", stale)
+        logger.info("Queue reconciled: %s transcript job(s) waiting", waiting)
         await start_notify_listener(application)
 
 

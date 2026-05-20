@@ -131,7 +131,10 @@ async def _listen_loop(app: Application, pubsub) -> None:
         job_id = payload.get("job_id")
         if not job_id:
             continue
-        await _handle_job_event(app, job_id)
+        try:
+            await _handle_job_event(app, job_id)
+        except Exception:
+            logger.exception("notify handler failed for job %s", job_id)
 
 
 async def _handle_job_event(app: Application, job_id: str) -> None:

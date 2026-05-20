@@ -85,6 +85,8 @@ class JobStore:
         raw = self._redis.get(self._key(job_id))
         if not raw:
             return None
+        if isinstance(raw, bytes):
+            raw = raw.decode()
         data = json.loads(raw)
         return Job.from_dict(data)
 
@@ -136,6 +138,55 @@ class JobStore:
     def queued_transcript_count(self) -> int:
         val = self._redis.get(QUEUE_COUNTER_KEY)
         return max(0, int(val or 0))
+
+    def reconcile_queue_counter(self) -> int:
+        """Recount waiting transcript jobs; fixes counter drift after crashes."""
+        waiting = 0
+        for key in self._redis.scan_iter(match=f"{JOB_KEY_PREFIX}*"):
+            raw = self._redis.get(key)
+            if not raw:
+                continue
+            try:
+                job = Job.from_dict(json.loads(raw))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+            if job.job_type == JobType.TRANSCRIPT and job.status in _TRANSCRIPT_WAITING:
+                waiting += 1
+        self._redis.set(QUEUE_COUNTER_KEY, waiting)
+        return waiting
+
+    def fail_stale_waiting_jobs(self, *, max_age_sec: int = 7200) -> int:
+        """Mark old queued/downloading jobs as failed (bot restarted mid-download)."""
+        from datetime import datetime, timezone
+
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_sec
+        failed = 0
+        for key in self._redis.scan_iter(match=f"{JOB_KEY_PREFIX}*"):
+            raw = self._redis.get(key)
+            if not raw:
+                continue
+            try:
+                job = Job.from_dict(json.loads(raw))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+            if job.job_type != JobType.TRANSCRIPT or job.status not in _TRANSCRIPT_WAITING:
+                continue
+            if not job.updated_at:
+                continue
+            try:
+                updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            if updated < cutoff:
+                self.update_status(
+                    job.job_id,
+                    JobStatus.FAILED,
+                    error="stale: bot or worker was restarted",
+                )
+                failed += 1
+        if failed:
+            self.reconcile_queue_counter()
+        return failed
 
     def queue_full(self) -> bool:
         return self.queued_transcript_count() >= MAX_QUEUE_SIZE

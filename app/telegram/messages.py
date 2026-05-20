@@ -29,6 +29,7 @@ ACCESS_DENIED = (
     "Добавьте его в ALLOWED_USER_IDS в telegram-bot.access.txt и перезапустите бота.\n"
     "Команда /whoami — показать id."
 )
+ACCESS_DENIED_ALERT = "Нет доступа к этому боту."
 WHOAMI = "Ваш Telegram user id: {user_id}\n\nЕсли бот пишет «нет доступа» — добавьте это число в ALLOWED_USER_IDS."
 RATE_LIMIT = "Слишком много файлов за час. Подождите и попробуйте позже."
 BUSY = "Уже идёт обработка. Дождитесь окончания или /status."

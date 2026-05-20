@@ -120,6 +120,17 @@ def test_queue_three_users_position(store: JobStore) -> None:
     assert store.queued_transcript_count() == 3
 
 
+def test_reconcile_queue_counter(store: JobStore) -> None:
+    store._redis.set("queue:transcript:queued_count", 99)
+    j1 = str(uuid.uuid4())
+    j2 = str(uuid.uuid4())
+    store.create(job_id=j1, job_type=JobType.TRANSCRIPT, user_id=1, chat_id=1)
+    store.create(job_id=j2, job_type=JobType.TRANSCRIPT, user_id=2, chat_id=2)
+    store.update_status(j2, JobStatus.EXTRACT)
+    assert store.reconcile_queue_counter() == 1
+    assert store.queued_transcript_count() == 1
+
+
 def test_list_user_jobs(store: JobStore) -> None:
     uid = 99
     ids = [str(uuid.uuid4()) for _ in range(3)]
