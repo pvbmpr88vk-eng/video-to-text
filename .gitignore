@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 venv/
 .env
+telegram-bot.access.txt
+*бота*.rtf
 
 # Media & outputs
 *.mp4

@@ -506,7 +506,7 @@ python -m app process "111.mp4" --language ru --summarize
 
 ## 16. Следующий шаг
 
-**ТЗ-04:** Telegram-бот; пайплайн 1→2→3 на сервере с Ollama.
+**ТЗ-04:** [Telegram-бот](TZ-04-telegram-bot.md); пайплайн 1→2→3 на сервере с Ollama.
 
 **Опционально v2:** backend `openai` за флагом `--provider openai` для тех, кому важнее скорость, чем приватность.
 

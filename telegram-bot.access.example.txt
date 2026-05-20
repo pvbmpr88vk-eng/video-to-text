@@ -1,0 +1,13 @@
+# Telegram — доступ к боту (шаблон)
+# Скопируйте в telegram-bot.access.txt и подставьте реальные значения.
+# Файл telegram-bot.access.txt не коммитится в git.
+
+# Токен от @BotFather (формат: 123456789:AAH...)
+BOT_TOKEN=
+
+# Ваш числовой user id (узнать: @userinfobot). Несколько id — через запятую.
+ALLOWED_USER_IDS=
+
+# Необязательно — для справки в /help
+BOT_USERNAME=
+BOT_LINK=

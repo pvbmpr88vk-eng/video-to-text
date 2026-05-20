@@ -175,8 +175,36 @@ python -m app process /path/to/video.mp4 --language ru --summarize
 
 Код выхода саммари: `6` — Ollama недоступна, модель не установлена, пустой текст.
 
+## Этап 4: Telegram-бот
+
+Локальный бот принимает видео/аудио (до **20 MB**), делает **транскрипт** (.txt) и предлагает кнопку **«Сделать тезисы»** — саммари через Ollama по запросу.
+
+### Настройка
+
+1. Создайте бота в [@BotFather](https://t.me/BotFather), узнайте свой `user_id` (например [@userinfobot](https://t.me/userinfobot)).
+2. Скопируйте шаблон и заполните токен и id (файл в `.gitignore`):
+
+```bash
+cp telegram-bot.access.example.txt telegram-bot.access.txt
+```
+
+Опционально: переменные `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ACCESS_FILE` в окружении перекрывают файл.
+
+3. Нужны **FFmpeg**; для кнопки «Сделать тезисы» — запущенная **Ollama** с моделью из этапа 3.
+
+### Запуск
+
+```bash
+python -m app bot -v
+```
+
+Код выхода **`7`** — нет токена / неверные credentials, или нет FFmpeg.
+
+Подробнее: [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md).
+
 ### Документация
 
 - [ТЗ-01: извлечение аудио](docs/TZ-01-audio-extraction.md)
 - [ТЗ-02: STT](docs/TZ-02-stt.md)
 - [ТЗ-03: саммари (локальная LLM / Ollama)](docs/TZ-03-summary.md)
+- [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md)

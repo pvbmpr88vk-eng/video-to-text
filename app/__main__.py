@@ -33,6 +33,7 @@ EXIT_FFMPEG = 3
 EXIT_INVALID_ARGS = 4
 EXIT_STT = 5
 EXIT_SUMMARY = 6
+EXIT_BOT = 7
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -243,6 +244,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Debug logging",
     )
 
+    bot = subparsers.add_parser(
+        "bot",
+        help="Run Telegram bot (long polling; see docs/TZ-04-telegram-bot.md)",
+    )
+    bot.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Debug logging",
+    )
+
     return parser
 
 
@@ -416,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_process(args)
     if args.command == "summarize":
         return _cmd_summarize(args)
+    if args.command == "bot":
+        from app.telegram.bot import run_bot
+
+        run_bot(verbose=args.verbose)
+        return EXIT_SUCCESS
 
     parser.error(f"Unknown command: {args.command}")
     return EXIT_INVALID_ARGS

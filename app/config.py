@@ -6,6 +6,20 @@ LOCAL_BIN_DIR = PROJECT_ROOT / ".local" / "bin"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "audio"
 DEFAULT_TRANSCRIPT_DIR = PROJECT_ROOT / "output" / "transcripts"
 DEFAULT_SUMMARY_DIR = PROJECT_ROOT / "output" / "summaries"
+DEFAULT_TELEGRAM_INBOX_DIR = PROJECT_ROOT / "output" / "telegram" / "inbox"
+
+TELEGRAM_ACCESS_FILE = os.environ.get("TELEGRAM_ACCESS_FILE", "").strip()
+TELEGRAM_RATE_LIMIT_PER_HOUR = int(os.environ.get("TELEGRAM_RATE_LIMIT_PER_HOUR", "10"))
+TELEGRAM_DEFAULT_LANGUAGE = os.environ.get("TELEGRAM_DEFAULT_LANGUAGE", "ru").strip() or "ru"
+TELEGRAM_ENABLE_SUMMARY = os.environ.get("TELEGRAM_ENABLE_SUMMARY", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+TELEGRAM_MESSAGE_MAX_LEN = 4096
+TELEGRAM_BOT_FILE_SIZE_LIMIT = 20_000_000
+TELEGRAM_STATUS_EDIT_MIN_SEC = 30.0
+TELEGRAM_MAX_THESIS_LINES_IN_CHAT = 15
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL_DEFAULT = os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")
