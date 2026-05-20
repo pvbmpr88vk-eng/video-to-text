@@ -5,6 +5,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -90,6 +91,72 @@ def track_theses_message(app: Application, transcript_job_id: str, message_id: i
     t = tracked.get(transcript_job_id)
     if t:
         t.theses_message_id = message_id
+
+
+async def reset_theses_processing_caption(
+    app: Application, *, chat_id: int, message_id: int
+) -> None:
+    try:
+        await app.bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=M.TRANSCRIPT_CAPTION,
+        )
+    except Exception:
+        logger.debug("Could not reset transcript caption", exc_info=True)
+
+
+async def notify_summary_failed(
+    app: Application, job: Job, *, detail: str
+) -> None:
+    chat_id = job.chat_id
+    tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
+    parent_id = job.parent_job_id or job.job_id
+    parent_track = tracked.get(parent_id)
+    if parent_track and parent_track.theses_message_id:
+        await reset_theses_processing_caption(
+            app,
+            chat_id=chat_id,
+            message_id=parent_track.theses_message_id,
+        )
+    await app.bot.send_message(chat_id, M.ERR_SUMMARY.format(detail=detail))
+
+
+def _summary_queued_age_sec(job: Job) -> float:
+    if not job.created_at:
+        return 0.0
+    try:
+        created = datetime.fromisoformat(job.created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    return max(0.0, datetime.now(timezone.utc).timestamp() - created.timestamp())
+
+
+async def mark_theses_button_processing(
+    app: Application,
+    *,
+    chat_id: int,
+    message_id: int,
+    parent_job_id: str,
+) -> None:
+    """Hide inline button and show in-caption progress on the transcript file."""
+    track_theses_message(app, parent_job_id, message_id)
+    try:
+        await app.bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=None,
+        )
+    except Exception:
+        logger.debug("Could not remove theses button", exc_info=True)
+    try:
+        await app.bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=M.TRANSCRIPT_THESES_PROCESSING,
+        )
+    except Exception:
+        logger.debug("Could not set theses processing caption", exc_info=True)
 
 
 async def start_notify_listener(app: Application) -> None:
@@ -254,13 +321,13 @@ async def _send_summary_messages(
 
     if parent_track and parent_track.theses_message_id:
         try:
-            await app.bot.edit_message_reply_markup(
+            await app.bot.edit_message_caption(
                 chat_id=chat_id,
                 message_id=parent_track.theses_message_id,
-                reply_markup=None,
+                caption=M.TRANSCRIPT_CAPTION,
             )
         except Exception:
-            logger.debug("Could not remove inline keyboard", exc_info=True)
+            logger.debug("Could not reset transcript caption", exc_info=True)
 
     theses_path = Path(job.theses_json) if job.theses_json else None
     if not theses_path or not theses_path.is_file():
@@ -317,6 +384,8 @@ async def try_deliver_summary(app: Application, job_id: str) -> bool:
 
 async def schedule_summary_delivery(app: Application, job_id: str) -> None:
     """Poll until summary is ready and deliver (covers missed pubsub events)."""
+    from app.queue.enqueue import ensure_summary_queued
+
     store: JobStore = app.bot_data["job_store"]
     for _ in range(600):
         if was_telegram_delivered(app.bot_data["redis"], job_id, "summary"):
@@ -324,11 +393,32 @@ async def schedule_summary_delivery(app: Application, job_id: str) -> None:
         job = store.get(job_id)
         if not job:
             return
+        if job.status == JobStatus.QUEUED:
+            ensure_summary_queued(store, job)
+            if _summary_queued_age_sec(job) > 120:
+                store.update_status(job_id, JobStatus.FAILED, error="summary_queue_timeout")
+                await notify_summary_failed(
+                    app, job, detail="задача не попала в очередь. Нажмите «Сделать тезисы» ещё раз."
+                )
+                return
         if job.status == JobStatus.DONE:
             if await try_deliver_summary(app, job_id):
                 return
         elif job.status in (JobStatus.FAILED, JobStatus.TIMEOUT, JobStatus.CANCELLED):
             await _handle_job_event(app, job_id)
+            fresh = store.get(job_id)
+            if fresh and fresh.status in (
+                JobStatus.FAILED,
+                JobStatus.TIMEOUT,
+                JobStatus.CANCELLED,
+            ):
+                if not was_telegram_delivered(app.bot_data["redis"], job_id, "failure"):
+                    await notify_summary_failed(
+                        app,
+                        fresh,
+                        detail=fresh.error or fresh.status.value,
+                    )
+                    mark_telegram_delivered(app.bot_data["redis"], job_id, "failure")
             return
         await asyncio.sleep(1)
 

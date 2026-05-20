@@ -74,3 +74,5 @@ SUMMARY_BUSY = "Сейчас идёт другая задача. Попробу�
 SUMMARY_STARTED = "Готовлю тезисы… (локальная LLM, может занять несколько минут)"
 SUMMARY_JOB_EXPIRED = "Эта транскрипция устарела. Отправьте файл заново."
 TRANSCRIPT_CAPTION = "Транскрипт (.txt)"
+TRANSCRIPT_THESES_PROCESSING = "Транскрипт (.txt)\n⏳ Готовлю тезисы…"
+THESES_ALREADY_PROCESSING = "Уже готовлю тезисы…"

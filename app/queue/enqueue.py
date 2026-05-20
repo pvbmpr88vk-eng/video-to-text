@@ -4,7 +4,7 @@ import logging
 
 from rq.job import Job as RQJob
 
-from app.jobs.models import Job
+from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.store import JobStore
 from app.queue.rq_connection import (
     DEFAULT_RETRY,
@@ -50,6 +50,41 @@ def enqueue_transcript(store: JobStore, job: Job) -> RQJob:
     )
     _attach_rq_id(store, job, rq_job)
     logger.info("Enqueued transcript job %s as RQ %s", job.job_id, rq_job.id)
+    return rq_job
+
+
+def _rq_job_alive(rq_job_id: str) -> bool:
+    try:
+        rq_job = RQJob.fetch(rq_job_id, connection=get_redis())
+    except Exception:
+        return False
+    return rq_job.get_status() in ("queued", "scheduled", "started", "deferred")
+
+
+def ensure_summary_queued(store: JobStore, job: Job | str) -> RQJob | None:
+    """
+    Ensure a summary job is registered in the RQ summary queue.
+    Fixes jobs stuck in Redis as queued without rq_job_id (e.g. after bot restart).
+    """
+    resolved = store.get(job.job_id) if isinstance(job, Job) else store.get(job)
+    if not resolved or resolved.job_type != JobType.SUMMARY:
+        return None
+    if resolved.status in (JobStatus.DONE, JobStatus.CANCELLED):
+        return None
+    if resolved.status == JobStatus.FAILED:
+        store.update_status(resolved.job_id, JobStatus.QUEUED, error=None)
+        resolved = store.get(resolved.job_id) or resolved
+    if resolved.status == JobStatus.SUMMARY:
+        return None
+    if resolved.status != JobStatus.QUEUED:
+        return None
+
+    if resolved.rq_job_id and _rq_job_alive(resolved.rq_job_id):
+        return None
+
+    _drop_stale_rq_job(resolved.job_id)
+    rq_job = enqueue_summary(store, resolved)
+    logger.info("Re-queued summary job %s as RQ %s", resolved.job_id, rq_job.id)
     return rq_job
 
 
