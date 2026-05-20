@@ -7,7 +7,11 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from app.config import SUMMARY_CHUNK_CHAR_LIMIT, SUMMARY_CHUNK_OVERLAP
+from app.config import (
+    OLLAMA_MODEL_DEFAULT,
+    SUMMARY_CHUNK_CHAR_LIMIT,
+    SUMMARY_CHUNK_OVERLAP,
+)
 from app.summary.chunking import split_transcript_text
 from app.summary.exceptions import EmptyTranscriptError, SummaryConfigError
 from app.summary.ollama_client import OllamaClient
@@ -99,7 +103,9 @@ def test_counting_transcript_uses_literal_fallback(mock_client_cls, tmp_path):
     }
 
     source = FIXTURES / "trivial_counting.json"
-    result = summarize_transcript(source, output_dir=tmp_path / "out", model="qwen2.5:3b-instruct")
+    result = summarize_transcript(
+        source, output_dir=tmp_path / "out", model=OLLAMA_MODEL_DEFAULT
+    )
     payload = json.loads(result.theses_path.read_text(encoding="utf-8"))
     blob = (payload["summary"] + " " + " ".join(payload["theses"])).lower()
     assert "созвон" not in blob or "раз" in blob
@@ -132,7 +138,7 @@ def test_summarize_short_fixture(mock_client_cls, tmp_path):
 
     source = FIXTURES / "short_transcript.json"
     result = summarize_transcript(
-        source, output_dir=tmp_path / "summaries", model="qwen2.5:3b-instruct"
+        source, output_dir=tmp_path / "summaries", model=OLLAMA_MODEL_DEFAULT
     )
     assert result.summary_path.exists()
     payload = json.loads(result.theses_path.read_text(encoding="utf-8"))
@@ -174,7 +180,7 @@ def test_summarize_reference_transcript_mock(
         REFERENCE_JSON,
         output_dir=out_dir,
         language="ru",
-        model="qwen2.5:3b-instruct",
+        model=OLLAMA_MODEL_DEFAULT,
     )
     assert result.summary_path.exists()
     payload = json.loads(result.theses_path.read_text(encoding="utf-8"))
@@ -189,7 +195,7 @@ def test_summarize_reference_transcript_mock(
 @patch("app.summary.ollama_client.httpx.get")
 def test_ollama_not_running(mock_get):
     mock_get.side_effect = httpx.ConnectError("connection refused")
-    client = OllamaClient(model="qwen2.5:3b-instruct")
+    client = OllamaClient(model=OLLAMA_MODEL_DEFAULT)
     with pytest.raises(SummaryConfigError, match="not reachable"):
         client.ensure_ready()
 
@@ -205,7 +211,7 @@ def test_summarize_reference_transcript_live(reference_transcript: dict, ollama_
         REFERENCE_JSON,
         output_dir=out_dir,
         language="ru",
-        model="qwen2.5:3b-instruct",
+        model=OLLAMA_MODEL_DEFAULT,
     )
     payload = json.loads(result.theses_path.read_text(encoding="utf-8"))
     assert len(payload["theses"]) >= 5

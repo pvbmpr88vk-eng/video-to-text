@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Download the single default summary model (qwen2.5:3b-instruct for 8 GB RAM).
-# Other models (7b, saiga) are not pulled by this project — install manually if needed.
+# Override: OLLAMA_MODEL=... ./scripts/pull-summary-model.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODEL="${OLLAMA_MODEL:-qwen2.5:3b-instruct}"

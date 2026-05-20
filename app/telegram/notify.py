@@ -123,13 +123,28 @@ async def notify_summary_failed(
 
 
 def _summary_queued_age_sec(job: Job) -> float:
-    if not job.created_at:
+    ts = job.updated_at or job.created_at
+    if not ts:
         return 0.0
     try:
-        created = datetime.fromisoformat(job.created_at.replace("Z", "+00:00"))
+        anchor = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return 0.0
-    return max(0.0, datetime.now(timezone.utc).timestamp() - created.timestamp())
+    return max(0.0, datetime.now(timezone.utc).timestamp() - anchor.timestamp())
+
+
+def _summary_queue_stuck(job: Job, *, timeout_sec: float = 600.0) -> bool:
+    """True when summary stays queued with no RQ worker picking it up."""
+    if job.status != JobStatus.QUEUED:
+        return False
+    if _summary_queued_age_sec(job) <= timeout_sec:
+        return False
+    if job.rq_job_id:
+        from app.queue.enqueue import _rq_job_alive
+
+        if _rq_job_alive(job.rq_job_id):
+            return False
+    return True
 
 
 async def mark_theses_button_processing(
@@ -395,11 +410,18 @@ async def schedule_summary_delivery(app: Application, job_id: str) -> None:
             return
         if job.status == JobStatus.QUEUED:
             ensure_summary_queued(store, job)
-            if _summary_queued_age_sec(job) > 120:
+            job = store.get(job_id) or job
+            if _summary_queue_stuck(job):
+                active = store.count_active_summaries()
+                if active > 0:
+                    detail = (
+                        "другая задача тезисов зависла. Нажмите «Сделать тезисы» ещё раз "
+                        "или перезапустите worker summary."
+                    )
+                else:
+                    detail = "задача не попала в очередь. Нажмите «Сделать тезисы» ещё раз."
                 store.update_status(job_id, JobStatus.FAILED, error="summary_queue_timeout")
-                await notify_summary_failed(
-                    app, job, detail="задача не попала в очередь. Нажмите «Сделать тезисы» ещё раз."
-                )
+                await notify_summary_failed(app, job, detail=detail)
                 return
         if job.status == JobStatus.DONE:
             if await try_deliver_summary(app, job_id):

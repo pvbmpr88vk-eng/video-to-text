@@ -153,9 +153,12 @@ def run_summary_job(job_id: str) -> None:
     active = store.count_active_summaries()
     job = store.get(job_id)
     if job and job.status != JobStatus.SUMMARY and active >= MAX_CONCURRENT_SUMMARIES:
-        raise RuntimeError(
-            f"summary concurrency limit ({MAX_CONCURRENT_SUMMARIES}) reached; retry later"
+        logger.info(
+            "Summary job %s deferred: concurrency limit (%s active)",
+            job_id,
+            active,
         )
+        return
     t0 = time.monotonic()
     try:
         store.update_status(job_id, JobStatus.SUMMARY)
@@ -174,6 +177,7 @@ def run_summary_job(job_id: str) -> None:
         store.update_status(
             job_id,
             JobStatus.DONE,
+            error=None,
             summary_md=str(summ.summary_path),
             theses_json=str(summ.theses_path),
             llm_model=summ.model,

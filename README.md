@@ -278,6 +278,7 @@ FFmpeg и faster-whisper загружаются **только в transcript-wor
 - [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md)
 - [ТЗ-05: параллельный backend (Redis + RQ)](docs/TZ-05-parallel-backend.md)
 - [ТЗ-06: загрузка по URL (yt-dlp)](docs/TZ-06-url-download.md)
+- [ТЗ-07: профили скорости (лёгкие модели STT и тезисов)](docs/TZ-07-speed-profiles.md)
 
 ## Этап 6: загрузка по ссылке (yt-dlp)
 
