@@ -48,4 +48,12 @@ def run_health_check(*, check_ollama: bool = True) -> int:
         except Exception as exc:
             logger.warning("Ollama unreachable: %s", exc)
 
+    try:
+        import yt_dlp  # noqa: F401
+
+        logger.info("yt-dlp OK")
+    except ImportError:
+        logger.error("yt-dlp not installed (required for URL download in bot)")
+        ok = False
+
     return 0 if ok else 1

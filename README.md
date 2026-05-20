@@ -277,6 +277,7 @@ FFmpeg и faster-whisper загружаются **только в transcript-wor
 - [ТЗ-03: саммари (локальная LLM / Ollama)](docs/TZ-03-summary.md)
 - [ТЗ-04: Telegram-бот](docs/TZ-04-telegram-bot.md)
 - [ТЗ-05: параллельный backend (Redis + RQ)](docs/TZ-05-parallel-backend.md)
+- [ТЗ-06: загрузка по URL (yt-dlp)](docs/TZ-06-url-download.md)
 
 ## Этап 6: загрузка по ссылке (yt-dlp)
 
@@ -284,6 +285,9 @@ FFmpeg и faster-whisper загружаются **только в transcript-wor
 
 ```bash
 pip install -r requirements.txt   # включает yt-dlp
+python -m app health              # проверяет yt-dlp, Redis, FFmpeg
 ```
 
 Дальше тот же пайплайн: Redis + workers + `python -m app bot -v`.
+
+Подробнее: [ТЗ-06: загрузка по URL](docs/TZ-06-url-download.md).

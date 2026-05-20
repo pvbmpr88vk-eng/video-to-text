@@ -345,45 +345,63 @@ async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     job_id = str(uuid.uuid4())
     ensure_job_dirs(job_id)
     inbox_dir = job_inbox_dir(job_id)
-
-    status_msg = await msg.reply_text(M.URL_DOWNLOADING)
-    job = store.create(
-        job_id=job_id,
-        job_type=JobType.TRANSCRIPT,
-        user_id=user.id,
-        chat_id=msg.chat_id,
-        language=TELEGRAM_DEFAULT_LANGUAGE,
-        message_id=msg.message_id,
-        status_message_id=status_msg.message_id,
-    )
-    store.update_status(job_id, JobStatus.DOWNLOADING, publish=True)
+    status_msg = None
 
     try:
+        status_msg = await msg.reply_text(M.URL_DOWNLOADING)
+        job = store.create(
+            job_id=job_id,
+            job_type=JobType.TRANSCRIPT,
+            user_id=user.id,
+            chat_id=msg.chat_id,
+            language=TELEGRAM_DEFAULT_LANGUAGE,
+            message_id=msg.message_id,
+            status_message_id=status_msg.message_id,
+        )
+        store.update_status(job_id, JobStatus.DOWNLOADING, publish=True)
+
         path = await asyncio.to_thread(
             download_media_url,
             url,
             inbox_dir,
             max_bytes=URL_DOWNLOAD_MAX_BYTES,
         )
+
+        store.update_status(job_id, JobStatus.QUEUED, inbox_path=str(path), publish=True)
+        job = store.get(job_id)
+        if job:
+            enqueue_transcript(store, job)
+        position = store.queued_transcript_count()
+        await status_msg.edit_text(M.QUEUE_POSITION.format(position=max(1, position)))
+        track_job(
+            context.application,
+            job_id=job_id,
+            chat_id=msg.chat_id,
+            status_message_id=status_msg.message_id,
+            reply_to_message_id=msg.message_id,
+        )
     except UrlDownloadError as exc:
         logger.warning("URL download failed for %s: %s", url[:80], exc)
         store.update_status(job_id, JobStatus.FAILED, error=f"url_download: {exc}")
-        await msg.reply_text(M.URL_DOWNLOAD_FAILED.format(detail=exc))
-        return
-
-    store.update_status(job_id, JobStatus.QUEUED, inbox_path=str(path), publish=True)
-    job = store.get(job_id)
-    if job:
-        enqueue_transcript(store, job)
-    position = store.queued_transcript_count()
-    await status_msg.edit_text(M.QUEUE_POSITION.format(position=max(1, position)))
-    track_job(
-        context.application,
-        job_id=job_id,
-        chat_id=msg.chat_id,
-        status_message_id=status_msg.message_id,
-        reply_to_message_id=msg.message_id,
-    )
+        err_text = M.URL_DOWNLOAD_FAILED.format(detail=exc)
+        if status_msg:
+            try:
+                await status_msg.edit_text(err_text)
+            except Exception:
+                await msg.reply_text(err_text)
+        else:
+            await msg.reply_text(err_text)
+    except Exception:
+        logger.exception("Failed to enqueue URL job")
+        store.update_status(job_id, JobStatus.FAILED, error="url_download: internal")
+        err_text = M.URL_DOWNLOAD_FAILED.format(detail="внутренняя ошибка")
+        if status_msg:
+            try:
+                await status_msg.edit_text(err_text)
+            except Exception:
+                await msg.reply_text(err_text)
+        else:
+            await msg.reply_text(err_text)
 
 
 async def on_unsupported_visual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
