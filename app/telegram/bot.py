@@ -32,6 +32,21 @@ async def _post_init(application) -> None:
         if stale:
             logger.warning("Marked %s stale transcript job(s) as failed", stale)
         logger.info("Queue reconciled: %s transcript job(s) waiting", waiting)
+        from app.queue.diagnostics import collect_queue_diagnostics
+
+        diag = collect_queue_diagnostics()
+        if diag.transcript_workers == 0:
+            logger.warning(
+                "No transcript RQ workers registered — start: python -m app worker transcript"
+            )
+        else:
+            logger.info(
+                "RQ workers: transcript=%s summary=%s (queued=%s started=%s)",
+                diag.transcript_workers,
+                diag.summary_workers,
+                diag.transcript_queued,
+                diag.transcript_started,
+            )
         await start_notify_listener(application)
 
 

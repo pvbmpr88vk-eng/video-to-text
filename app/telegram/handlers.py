@@ -33,6 +33,7 @@ from app.telegram.auth import MediaRateLimiter, is_allowed
 from app.telegram.credentials import TelegramCredentials
 from app.telegram.jobs import CALLBACK_THESES_PREFIX, parse_theses_callback
 from app.telegram.notify import track_job, track_theses_message
+from app.telegram.queue_msg import format_queue_accept_message
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,14 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     store = _store(context)
     jobs = store.list_user_jobs(user.id, limit=5)
     queued = store.queued_transcript_count()
-    lines = [f"В очереди transcript: {queued} (лимит {MAX_QUEUE_SIZE})"]
+    from app.queue.diagnostics import format_queue_status
+
+    lines = [
+        f"В очереди transcript: {queued} (лимит {MAX_QUEUE_SIZE})",
+        f"Обрабатывается сейчас: {store.count_processing_transcripts()}",
+        "",
+        format_queue_status(),
+    ]
     if jobs:
         lines.append("Ваши задачи:")
         lines.extend(_format_job_line(j) for j in jobs)
@@ -243,10 +251,9 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         await tg_file.download_to_drive(custom_path=str(dest))
 
-        position = store.queued_transcript_count()
         store.update_status(job_id, JobStatus.QUEUED, publish=True)
         enqueue_transcript(store, job)
-        await status_msg.edit_text(M.QUEUE_POSITION.format(position=max(1, position)))
+        await status_msg.edit_text(format_queue_accept_message(store))
 
         track_job(
             context.application,
@@ -375,8 +382,7 @@ async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         job = store.get(job_id)
         if job:
             enqueue_transcript(store, job)
-        position = store.queued_transcript_count()
-        await status_msg.edit_text(M.QUEUE_POSITION.format(position=max(1, position)))
+        await status_msg.edit_text(format_queue_accept_message(store))
         track_job(
             context.application,
             job_id=job_id,

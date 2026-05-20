@@ -264,6 +264,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not check Ollama (for transcript-only workers)",
     )
 
+    queue = subparsers.add_parser("queue", help="Redis/RQ queue diagnostics")
+    queue_sub = queue.add_subparsers(dest="queue_command", required=True)
+    queue_sub.add_parser("status", help="Show workers and queue depth")
+
     jobs = subparsers.add_parser("jobs", help="Job maintenance")
     jobs_sub = jobs.add_subparsers(dest="jobs_command", required=True)
     cleanup = jobs_sub.add_parser("cleanup", help="Remove old job directories")
@@ -462,6 +466,13 @@ def main(argv: list[str] | None = None) -> int:
         from app.worker.health import run_health_check
 
         return run_health_check(check_ollama=not args.skip_ollama)
+    if args.command == "queue":
+        if args.queue_command == "status":
+            from app.queue.diagnostics import format_queue_status
+
+            print(format_queue_status())
+            return EXIT_SUCCESS
+
     if args.command == "jobs":
         if args.jobs_command == "cleanup":
             from app.jobs.cleanup import cleanup_old_jobs

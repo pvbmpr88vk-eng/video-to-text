@@ -21,6 +21,7 @@ _TRANSCRIPT_LEFT_QUEUE = frozenset(
     }
 )
 _TRANSCRIPT_WAITING = frozenset({JobStatus.QUEUED, JobStatus.DOWNLOADING})
+_TRANSCRIPT_PROCESSING = frozenset({JobStatus.EXTRACT, JobStatus.STT})
 JOB_KEY_PREFIX = "job:"
 USER_JOBS_PREFIX = "user_jobs:"
 QUEUE_COUNTER_KEY = "queue:transcript:queued_count"
@@ -138,6 +139,22 @@ class JobStore:
     def queued_transcript_count(self) -> int:
         val = self._redis.get(QUEUE_COUNTER_KEY)
         return max(0, int(val or 0))
+
+    def count_processing_transcripts(self) -> int:
+        count = 0
+        for key in self._redis.scan_iter(match=f"{JOB_KEY_PREFIX}*"):
+            raw = self._redis.get(key)
+            if not raw:
+                continue
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            try:
+                job = Job.from_dict(json.loads(raw))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+            if job.job_type == JobType.TRANSCRIPT and job.status in _TRANSCRIPT_PROCESSING:
+                count += 1
+        return count
 
     def reconcile_queue_counter(self) -> int:
         """Recount waiting transcript jobs; fixes counter drift after crashes."""

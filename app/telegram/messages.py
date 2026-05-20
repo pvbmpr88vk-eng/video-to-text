@@ -34,7 +34,16 @@ WHOAMI = "Ваш Telegram user id: {user_id}\n\nЕсли бот пишет «н�
 RATE_LIMIT = "Слишком много файлов за час. Подождите и попробуйте позже."
 BUSY = "Уже идёт обработка. Дождитесь окончания или /status."
 QUEUE_FULL = "Очередь переполнена ({max_size} задач). Попробуйте позже."
-QUEUE_POSITION = "Файл принят. В очереди (позиция {position})…"
+QUEUE_POSITION = (
+    "Файл принят. В очереди: №{position}.\n"
+    "{processing_hint}"
+    "Распознавание на CPU может занять 10–60+ мин. /status — проверить этап."
+)
+QUEUE_PROCESSING_ACTIVE = "Сейчас обрабатывается другая задача — ваша начнётся после неё.\n"
+QUEUE_NO_WORKER = (
+    "⚠️ Worker transcript не запущен — задача не обработается.\n"
+    "В отдельном терминале: python -m app worker transcript"
+)
 DOWNLOADING = "Скачиваю файл…"
 FILE_TOO_LARGE = (
     "Файл {size_mb:.1f} MB — лимит Telegram для ботов 20 MB. "

@@ -17,6 +17,7 @@ from app.jobs.store import JobStore
 from app.telegram import messages as M
 from app.telegram.formatting import format_summary_for_chat, split_telegram_message
 from app.telegram.jobs import CALLBACK_THESES_PREFIX
+from app.telegram.queue_msg import format_queue_accept_message
 
 logger = logging.getLogger(__name__)
 
