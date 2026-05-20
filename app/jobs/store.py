@@ -219,3 +219,22 @@ class JobStore:
     def is_cancelled(self, job_id: str) -> bool:
         job = self.get(job_id)
         return job is not None and job.status == JobStatus.CANCELLED
+
+    def find_summary_for_parent(self, parent_job_id: str) -> Job | None:
+        """Latest summary child job for a transcript (any status)."""
+        parent = self.get(parent_job_id)
+        if not parent:
+            return None
+        candidates: list[Job] = []
+        for raw_id in self._redis.smembers(f"{USER_JOBS_PREFIX}{parent.user_id}"):
+            jid = raw_id.decode() if isinstance(raw_id, bytes) else raw_id
+            job = self.get(jid)
+            if (
+                job
+                and job.job_type == JobType.SUMMARY
+                and job.parent_job_id == parent_job_id
+            ):
+                candidates.append(job)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda j: j.created_at or "")

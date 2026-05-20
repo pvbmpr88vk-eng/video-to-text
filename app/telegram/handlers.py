@@ -32,6 +32,7 @@ from app.telegram import messages as M
 from app.telegram.auth import MediaRateLimiter, is_allowed
 from app.telegram.credentials import TelegramCredentials
 from app.telegram.jobs import CALLBACK_THESES_PREFIX, parse_theses_callback
+from app.telegram.idempotency import claim_inbound_message
 from app.telegram.notify import track_job, track_theses_message
 from app.telegram.queue_msg import format_queue_accept_message
 
@@ -194,6 +195,10 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     if not message:
         return
+    redis = context.application.bot_data["redis"]
+    if not claim_inbound_message(redis, message.chat_id, message.message_id):
+        logger.debug("Skip duplicate media message chat=%s msg=%s", message.chat_id, message.message_id)
+        return
 
     rl: MediaRateLimiter = context.application.bot_data["rate_limiter"]
     store = _store(context)
@@ -298,6 +303,15 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
         return
 
+    existing = store.find_summary_for_parent(parent_job_id)
+    if existing:
+        if existing.status in (JobStatus.QUEUED, JobStatus.SUMMARY):
+            await query.answer("Тезисы уже готовятся…", show_alert=True)
+            return
+        if existing.status == JobStatus.DONE:
+            await query.answer("Тезисы уже отправлены в чат.", show_alert=True)
+            return
+
     await query.answer(M.SUMMARY_STARTED)
     chat_id = query.message.chat_id if query.message else user.id
     status_msg = await context.bot.send_message(chat_id, M.SUMMARY_STARTED)
@@ -336,6 +350,10 @@ async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     msg = update.effective_message
     if not msg or not msg.text:
+        return
+    redis = context.application.bot_data["redis"]
+    if not claim_inbound_message(redis, msg.chat_id, msg.message_id):
+        logger.debug("Skip duplicate URL message chat=%s msg=%s", msg.chat_id, msg.message_id)
         return
     url = extract_url(msg.text)
     if not url:
@@ -392,26 +410,13 @@ async def on_text_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
     except UrlDownloadError as exc:
         logger.warning("URL download failed for %s: %s", url[:80], exc)
-        store.update_status(job_id, JobStatus.FAILED, error=f"url_download: {exc}")
-        err_text = M.URL_DOWNLOAD_FAILED.format(detail=exc)
-        if status_msg:
-            try:
-                await status_msg.edit_text(err_text)
-            except Exception:
-                await msg.reply_text(err_text)
-        else:
-            await msg.reply_text(err_text)
+        if store.get(job_id):
+            store.update_status(job_id, JobStatus.FAILED, error=f"url_download: {exc}")
+        # Сообщение в чат — только через notify (без дубля edit + send)
     except Exception:
         logger.exception("Failed to enqueue URL job")
-        store.update_status(job_id, JobStatus.FAILED, error="url_download: internal")
-        err_text = M.URL_DOWNLOAD_FAILED.format(detail="внутренняя ошибка")
-        if status_msg:
-            try:
-                await status_msg.edit_text(err_text)
-            except Exception:
-                await msg.reply_text(err_text)
-        else:
-            await msg.reply_text(err_text)
+        if store.get(job_id):
+            store.update_status(job_id, JobStatus.FAILED, error="url_download: internal")
 
 
 async def on_unsupported_visual(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

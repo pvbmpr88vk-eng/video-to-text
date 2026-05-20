@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -51,7 +52,19 @@ def download_media_url(
         "socket_timeout": timeout,
         "quiet": True,
         "no_warnings": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        # YouTube often returns HTTP 403 for default web client — prefer mobile clients.
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "web"],
+                "player_skip": ["webpage"],
+            }
+        },
     }
+    cookies_file = os.environ.get("YT_DLP_COOKIES_FILE", "").strip()
+    if cookies_file and Path(cookies_file).is_file():
+        ydl_opts["cookiefile"] = cookies_file
 
     logger.info("Downloading URL via yt-dlp: %s", url[:120])
     try:

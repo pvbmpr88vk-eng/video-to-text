@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 import httpx
@@ -104,9 +105,24 @@ def run_bot(*, verbose: bool = False) -> None:
 
     register_handlers(application)
 
+    bot_lock_key = "bot:telegram:polling"
+    if not redis.set(bot_lock_key, str(os.getpid()), nx=True, ex=86400):
+        holder = redis.get(bot_lock_key)
+        if isinstance(holder, bytes):
+            holder = holder.decode()
+        print(
+            f"Error: another Telegram bot is already running (lock holder pid={holder}).\n"
+            "Остановите второй процесс: pkill -f 'python -m app bot'",
+            file=sys.stderr,
+        )
+        raise SystemExit(7)
+
     logger.info(
         "Starting Telegram bot (queue=%s, allowed user ids: %s)",
         JOB_QUEUE_ENABLED,
         sorted(creds.allowed_user_ids) if creds.allowed_user_ids else "none",
     )
-    application.run_polling()
+    try:
+        application.run_polling()
+    finally:
+        redis.delete(bot_lock_key)

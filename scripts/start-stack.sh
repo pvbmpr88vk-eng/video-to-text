@@ -17,6 +17,7 @@ pkill -9 -f "python -m app bot" 2>/dev/null || true
 sleep 2
 
 python -m app jobs reset-stuck
+python -c "from app.queue.workers_cleanup import prune_dead_workers; print('Dead RQ workers removed:', prune_dead_workers())"
 python -m app queue status
 
 echo ""

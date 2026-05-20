@@ -271,6 +271,7 @@ def _build_parser() -> argparse.ArgumentParser:
     queue = subparsers.add_parser("queue", help="Redis/RQ queue diagnostics")
     queue_sub = queue.add_subparsers(dest="queue_command", required=True)
     queue_sub.add_parser("status", help="Show workers and queue depth")
+    queue_sub.add_parser("prune-workers", help="Unregister dead RQ workers from Redis")
 
     jobs = subparsers.add_parser("jobs", help="Job maintenance")
     jobs_sub = jobs.add_subparsers(dest="jobs_command", required=True)
@@ -479,6 +480,11 @@ def main(argv: list[str] | None = None) -> int:
             from app.queue.diagnostics import format_queue_status
 
             print(format_queue_status())
+            return EXIT_SUCCESS
+        if args.queue_command == "prune-workers":
+            from app.queue.workers_cleanup import prune_dead_workers
+
+            print(f"Removed {prune_dead_workers()} dead worker registration(s)")
             return EXIT_SUCCESS
 
     if args.command == "jobs":

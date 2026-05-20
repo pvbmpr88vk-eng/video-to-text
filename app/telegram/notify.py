@@ -11,6 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 
 from app.config import MAX_QUEUE_SIZE, TELEGRAM_STATUS_EDIT_MIN_SEC
+from app.jobs.delivery import claim_telegram_delivery
 from app.jobs.events import JOB_EVENTS_CHANNEL
 from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.store import JobStore
@@ -87,6 +88,9 @@ def track_theses_message(app: Application, transcript_job_id: str, message_id: i
 
 
 async def start_notify_listener(app: Application) -> None:
+    if app.bot_data.get("notify_task"):
+        logger.warning("Notify listener already running — skip duplicate start")
+        return
     redis = app.bot_data["redis"]
     pubsub = redis.pubsub()
     pubsub.subscribe(JOB_EVENTS_CHANNEL)
@@ -194,6 +198,10 @@ async def _maybe_edit_status(app: Application, job: Job, track: TrackedJob | Non
 
 
 async def _deliver_transcript(app: Application, job: Job, track: TrackedJob | None) -> None:
+    redis = app.bot_data["redis"]
+    if not claim_telegram_delivery(redis, job.job_id, "transcript"):
+        logger.info("Skip duplicate transcript delivery for job %s", job.job_id)
+        return
     chat_id = track.chat_id if track else job.chat_id
     if track and track.status_message_id:
         try:
@@ -222,6 +230,10 @@ async def _deliver_transcript(app: Application, job: Job, track: TrackedJob | No
 
 
 async def _deliver_summary(app: Application, job: Job, track: TrackedJob | None) -> None:
+    redis = app.bot_data["redis"]
+    if not claim_telegram_delivery(redis, job.job_id, "summary"):
+        logger.info("Skip duplicate summary delivery for job %s", job.job_id)
+        return
     chat_id = track.chat_id if track else job.chat_id
     parent_id = job.parent_job_id or job.job_id
     tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
@@ -255,14 +267,19 @@ async def _deliver_summary(app: Application, job: Job, track: TrackedJob | None)
 
 
 async def _deliver_failure(app: Application, job: Job, track: TrackedJob | None) -> None:
+    redis = app.bot_data["redis"]
+    if not claim_telegram_delivery(redis, job.job_id, "failure"):
+        logger.info("Skip duplicate failure delivery for job %s", job.job_id)
+        return
     chat_id = track.chat_id if track else job.chat_id
     detail = job.error or job.status.value
     text = _error_message(detail) if job.job_type == JobType.TRANSCRIPT else M.ERR_SUMMARY.format(detail=detail)
-    if track and track.status_message_id:
+    status_message_id = (track.status_message_id if track else None) or job.status_message_id
+    if status_message_id:
         try:
             await app.bot.edit_message_text(
                 chat_id=chat_id,
-                message_id=track.status_message_id,
+                message_id=status_message_id,
                 text=text,
             )
             return
