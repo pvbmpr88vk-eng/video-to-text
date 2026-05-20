@@ -53,8 +53,18 @@ def cancel_rq_job(rq_job_id: str | None) -> bool:
     if not rq_job_id:
         return False
     try:
-        rq_job = RQJob.fetch(rq_job_id, connection=get_redis())
+        redis = get_redis()
+        rq_job = RQJob.fetch(rq_job_id, connection=redis)
+        status = rq_job.get_status()
         rq_job.cancel()
+        if status in ("started", "deferred"):
+            try:
+                from rq.command import send_stop_job_command
+
+                if rq_job.worker_name:
+                    send_stop_job_command(redis, rq_job.worker_name)
+            except Exception:
+                logger.debug("send_stop_job_command failed", exc_info=True)
         return True
     except Exception:
         logger.debug("Could not cancel RQ job %s", rq_job_id, exc_info=True)

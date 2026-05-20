@@ -69,6 +69,10 @@ def run_transcript_job(job_id: str) -> None:
         if store.is_cancelled(job_id):
             return
 
+        if store.is_cancelled(job_id):
+            logger.info("Transcript job %s cancelled before STT", job_id)
+            return
+
         workers = resolve_workers(None, default=MAX_STT_WORKERS_PER_JOB)
         tr = transcribe_audio(
             wav,
@@ -81,6 +85,10 @@ def run_transcript_job(job_id: str) -> None:
             workers=workers,
             keep_chunks=False,
         )
+
+        if store.is_cancelled(job_id):
+            logger.info("Transcript job %s was cancelled; skipping DONE", job_id)
+            return
 
         store.update_status(
             job_id,

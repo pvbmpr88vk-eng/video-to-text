@@ -278,6 +278,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="TTL in hours (default: JOB_CLEANUP_TTL_HOURS)",
     )
     cleanup.add_argument("--dry-run", action="store_true", help="List dirs without deleting")
+    reset_stuck = jobs_sub.add_parser(
+        "reset-stuck",
+        help="Fail zombie jobs in extract/stt and reconcile queue (restart worker after)",
+    )
 
     return parser
 
@@ -479,6 +483,16 @@ def main(argv: list[str] | None = None) -> int:
 
             removed = cleanup_old_jobs(ttl_hours=args.ttl_hours, dry_run=args.dry_run)
             print(f"Removed {removed} job director{'y' if removed == 1 else 'ies'}")
+            return EXIT_SUCCESS
+        if args.jobs_command == "reset-stuck":
+            from app.jobs.reset import reset_stuck_jobs
+
+            stats = reset_stuck_jobs()
+            print(
+                "Reset: processing_failed={processing_failed}, waiting_failed={waiting_failed}, "
+                "rq_canceled={rq_canceled}, queue_waiting={queue_waiting}".format(**stats)
+            )
+            print("Перезапустите: python -m app worker transcript")
             return EXIT_SUCCESS
 
     parser.error(f"Unknown command: {args.command}")
