@@ -1,0 +1,6 @@
+# Local dev (Docker Desktop on Mac): Ollama on host, same as 4 GB VPS layout.
+
+services:
+  worker-summary:
+    environment:
+      OLLAMA_HOST: http://host.docker.internal:11434

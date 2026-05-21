@@ -1,3 +1,15 @@
+# Base stack. 4 GB VPS: cp deploy/env/minimal-4gb.env .env + Ollama on host.
+# Prod: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Dev (Mac, Ollama on host): docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+x-app-build: &app-build
+  build: .
+  env_file:
+    - .env
+  environment:
+    REDIS_URL: redis://redis:6379/0
+  restart: unless-stopped
+
 services:
   redis:
     image: redis:7-alpine
@@ -11,54 +23,43 @@ services:
       retries: 5
 
   bot:
-    build: .
+    <<: *app-build
     command: python -m app bot
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - ./output:/app/output
       - ./telegram-bot.access.txt:/app/telegram-bot.access.txt:ro
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
+      start_period: 20s
 
   worker-transcript:
-    build: .
+    <<: *app-build
     command: python -m app worker transcript
-    env_file:
-      - .env
-    environment:
-      REDIS_URL: redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - ./output:/app/output
-    restart: unless-stopped
+      - whisper_cache:/home/appuser/.cache/huggingface
     healthcheck:
       test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
-    deploy:
-      replicas: 1
+      start_period: 30s
 
   worker-summary:
-    build: .
+    <<: *app-build
     command: python -m app worker summary
-    env_file:
-      - .env
     environment:
       REDIS_URL: redis://redis:6379/0
-      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://host.docker.internal:11434}
     depends_on:
       redis:
         condition: service_healthy
@@ -66,14 +67,28 @@ services:
       - ./output:/app/output
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
+      test: ["CMD", "python", "-m", "app", "health"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+
+  # Optional: only if VPS has enough RAM (≥8 GB). Otherwise install Ollama on the host.
+  ollama:
+    profiles: [with-ollama]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 10s
-      retries: 3
-    deploy:
-      replicas: 1
+      retries: 5
+      start_period: 30s
 
 volumes:
   redis_data:
+  whisper_cache:
+  ollama_data:

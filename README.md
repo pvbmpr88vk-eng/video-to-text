@@ -217,10 +217,13 @@ python -m app bot -v
 **Docker Compose** (redis + bot + 2 workers):
 
 ```bash
-cp .env.example .env   # при необходимости
-docker compose up -d --build
+cp .env.docker.example .env   # или deploy/env/minimal-4gb.env для VPS 4 GB
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+./scripts/deploy-check.sh
 docker compose logs -f bot
 ```
+
+**VPS 2 vCPU / 4 GB RAM:** Ollama на **хосте** (не в Docker), лимиты в `deploy/env/minimal-4gb.env`. Подробно: [deploy/README.md](deploy/README.md), [ТЗ-08](docs/TZ-08-docker-deploy.md).
 
 Проверка инфраструктуры:
 
@@ -279,6 +282,7 @@ FFmpeg и faster-whisper загружаются **только в transcript-wor
 - [ТЗ-05: параллельный backend (Redis + RQ)](docs/TZ-05-parallel-backend.md)
 - [ТЗ-06: загрузка по URL (yt-dlp)](docs/TZ-06-url-download.md)
 - [ТЗ-07: профили скорости (лёгкие модели STT и тезисов)](docs/TZ-07-speed-profiles.md)
+- [ТЗ-08: подготовка к деплою в Docker](docs/TZ-08-docker-deploy.md)
 
 ## Этап 6: загрузка по ссылке (yt-dlp)
 
