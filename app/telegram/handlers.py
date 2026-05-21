@@ -47,6 +47,37 @@ from app.telegram.queue_msg import format_queue_accept_message
 logger = logging.getLogger(__name__)
 
 
+async def _answer_callback_safe(query, text: str, *, alert: bool = False) -> None:
+    """Telegram requires answer within ~30s; ignore expired callback queries."""
+    try:
+        await query.answer(text, show_alert=alert)
+    except BadRequest as exc:
+        if "query is too old" in str(exc).lower() or "query id is invalid" in str(exc).lower():
+            logger.debug("Callback query expired: %s", exc)
+            return
+        raise
+
+
+async def _fail_media_download(
+    *,
+    store: JobStore,
+    job_id: str | None,
+    status_msg: Message | None,
+    message: Message,
+    error_code: str,
+    user_text: str,
+) -> None:
+    if job_id and store.get(job_id):
+        store.update_status(job_id, JobStatus.FAILED, error=error_code, publish=True)
+    if status_msg:
+        try:
+            await status_msg.edit_text(user_text)
+            return
+        except Exception:
+            logger.debug("Could not edit download status message", exc_info=True)
+    await message.reply_text(user_text)
+
+
 class _StoryForwardFilter(filters.MessageFilter):
     def filter(self, message: Message) -> bool:
         return bool(message.story)
@@ -202,33 +233,6 @@ async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     await update.effective_message.reply_text(M.WHOAMI.format(user_id=u.id))
 
 
-def _format_job_line(job) -> str:
-    return f"• {job.job_id[:8]}… — {job.status.value} ({job.job_type.value})"
-
-
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _guard_access(update, context):
-        return
-    user = update.effective_user
-    store = _store(context)
-    jobs = store.list_user_jobs(user.id, limit=5)
-    queued = store.queued_transcript_count()
-    from app.queue.diagnostics import format_queue_status
-
-    lines = [
-        f"В очереди transcript: {queued} (лимит {MAX_QUEUE_SIZE})",
-        f"Обрабатывается сейчас: {store.count_processing_transcripts()}",
-        "",
-        format_queue_status(),
-    ]
-    if jobs:
-        lines.append("Ваши задачи:")
-        lines.extend(_format_job_line(j) for j in jobs)
-    else:
-        lines.append("Активных задач нет.")
-    await update.effective_message.reply_text("\n".join(lines))
-
-
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _guard_access(update, context):
         return
@@ -273,6 +277,7 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     job_id: str | None = None
+    status_msg: Message | None = None
     try:
         if message.document and not _document_allowed(
             message.document, forwarded=_is_forwarded(message)
@@ -353,50 +358,77 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except BadRequest as exc:
         logger.warning("Telegram API rejected file download: %s", exc)
         err = str(exc).lower()
-        if job_id and store.get(job_id):
-            code = "file_too_large" if "too big" in err or "file is too large" in err else "telegram_download"
-            store.update_status(job_id, JobStatus.FAILED, error=code)
+        code = "file_too_large" if "too big" in err or "file is too large" in err else "telegram_download"
         if "too big" in err or "file is too large" in err:
             size_mb = (file_size / 1e6) if file_size else None
             if size_mb is not None and size_mb <= 25 and telegram_file_limit_mb() > 100:
-                await message.reply_text(
-                    M.TELEGRAM_FILE_TOO_BIG_API.format(size_mb=size_mb)
-                )
+                user_text = M.TELEGRAM_FILE_TOO_BIG_API.format(size_mb=size_mb)
             else:
                 size_hint = f" ({size_mb:.0f} MB)" if size_mb is not None else ""
-                await message.reply_text(
-                    M.FILE_TOO_LARGE_HINT.format(
-                        size_hint=size_hint,
-                        limit_mb=telegram_file_limit_mb(),
-                    )
+                user_text = M.FILE_TOO_LARGE_HINT.format(
+                    size_hint=size_hint,
+                    limit_mb=telegram_file_limit_mb(),
                 )
         else:
-            await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
+            user_text = M.TELEGRAM_DOWNLOAD_FAILED
+        await _fail_media_download(
+            store=store,
+            job_id=job_id,
+            status_msg=status_msg,
+            message=message,
+            error_code=code,
+            user_text=user_text,
+        )
     except InvalidToken as exc:
         logger.warning("Telegram file download URL error: %s", exc)
-        if job_id and store.get(job_id):
-            store.update_status(job_id, JobStatus.FAILED, error="telegram_download")
-        await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
+        await _fail_media_download(
+            store=store,
+            job_id=job_id,
+            status_msg=status_msg,
+            message=message,
+            error_code="telegram_download",
+            user_text=M.TELEGRAM_DOWNLOAD_FAILED,
+        )
     except TimedOut as exc:
         logger.warning("Telegram download timed out: %s", exc)
-        if job_id and store.get(job_id):
-            store.update_status(job_id, JobStatus.FAILED, error="telegram_download_timeout")
-        await message.reply_text(M.TELEGRAM_DOWNLOAD_TIMEOUT)
+        await _fail_media_download(
+            store=store,
+            job_id=job_id,
+            status_msg=status_msg,
+            message=message,
+            error_code="telegram_download_timeout",
+            user_text=M.TELEGRAM_DOWNLOAD_TIMEOUT,
+        )
     except NetworkError as exc:
         logger.warning("Telegram download network error: %s", exc)
-        if job_id and store.get(job_id):
-            store.update_status(job_id, JobStatus.FAILED, error="telegram_download")
-        await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
+        await _fail_media_download(
+            store=store,
+            job_id=job_id,
+            status_msg=status_msg,
+            message=message,
+            error_code="telegram_download",
+            user_text=M.TELEGRAM_DOWNLOAD_FAILED,
+        )
     except OSError as exc:
         logger.exception("Failed to save downloaded file: %s", exc)
-        if job_id and store.get(job_id):
-            store.update_status(job_id, JobStatus.FAILED, error="telegram_download")
-        await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
+        await _fail_media_download(
+            store=store,
+            job_id=job_id,
+            status_msg=status_msg,
+            message=message,
+            error_code="telegram_download",
+            user_text=M.TELEGRAM_DOWNLOAD_FAILED,
+        )
     except Exception:
         logger.exception("Failed to enqueue media job")
-        if job_id and store.get(job_id):
-            store.update_status(job_id, JobStatus.FAILED, error="telegram_download")
-        await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
+        await _fail_media_download(
+            store=store,
+            job_id=job_id,
+            status_msg=status_msg,
+            message=message,
+            error_code="telegram_download",
+            user_text=M.TELEGRAM_DOWNLOAD_FAILED,
+        )
 
 
 async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -418,16 +450,16 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     store = _store(context)
     parent = store.get(parent_job_id)
     if not parent:
-        await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
+        await _answer_callback_safe(query, M.SUMMARY_JOB_EXPIRED, alert=True)
         return
     if parent.user_id != user.id:
-        await query.answer(M.ACCESS_DENIED_ALERT, show_alert=True)
+        await _answer_callback_safe(query, M.ACCESS_DENIED_ALERT, alert=True)
         return
     if parent.status != JobStatus.DONE or not parent.transcript_json:
-        await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
+        await _answer_callback_safe(query, M.SUMMARY_JOB_EXPIRED, alert=True)
         return
     if not Path(parent.transcript_json).is_file():
-        await query.answer(M.SUMMARY_JOB_EXPIRED, show_alert=True)
+        await _answer_callback_safe(query, M.SUMMARY_JOB_EXPIRED, alert=True)
         return
 
     redis = context.application.bot_data["redis"]
@@ -435,6 +467,7 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     msg = query.message
 
     async def _hide_button_and_answer(toast: str, *, alert: bool = False) -> None:
+        await _answer_callback_safe(query, toast, alert=alert)
         if msg:
             await mark_theses_button_processing(
                 context.application,
@@ -442,14 +475,13 @@ async def on_theses_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 message_id=msg.message_id,
                 parent_job_id=parent_job_id,
             )
-        await query.answer(toast, show_alert=alert)
 
     existing = store.find_summary_for_parent(parent_job_id)
     if existing and existing.status == JobStatus.DONE:
         from app.jobs.delivery import was_telegram_delivered
 
         if was_telegram_delivered(redis, existing.job_id, "summary"):
-            await query.answer("Тезисы уже отправлены в чат.", show_alert=True)
+            await _answer_callback_safe(query, "Тезисы уже отправлены в чат.", alert=True)
             return
         await _hide_button_and_answer("Отправляю тезисы…")
         if await try_deliver_summary(context.application, existing.job_id):
@@ -608,7 +640,6 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("whoami", cmd_whoami))
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
-    application.add_handler(CommandHandler("status", cmd_status))
     application.add_handler(CommandHandler("cancel", cmd_cancel))
     application.add_handler(CallbackQueryHandler(on_theses_callback, pattern=f"^{CALLBACK_THESES_PREFIX}"))
 

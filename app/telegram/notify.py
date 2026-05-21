@@ -184,7 +184,7 @@ async def mark_theses_button_processing(
     except Exception:
         logger.debug("Could not remove theses button", exc_info=True)
     try:
-        caption = f"{M.TRANSCRIPT_CAPTION}\n⏳ Тезисы: 5%"
+        caption = f"{M.TRANSCRIPT_CAPTION}\n⏳ Тезисы"
         await app.bot.edit_message_caption(
             chat_id=chat_id,
             message_id=message_id,

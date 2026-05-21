@@ -239,6 +239,39 @@ class JobStore:
             self.reconcile_queue_counter()
         return failed
 
+    def fail_stale_downloading_jobs(self, *, max_age_sec: int = 600) -> int:
+        """Fail transcript jobs stuck in DOWNLOADING (crashed bot, hung Telegram API)."""
+        from datetime import datetime, timezone
+
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_sec
+        failed = 0
+        for key in self._redis.scan_iter(match=f"{JOB_KEY_PREFIX}*"):
+            raw = self._redis.get(key)
+            if not raw:
+                continue
+            try:
+                job = Job.from_dict(json.loads(raw))
+            except (json.JSONDecodeError, KeyError, TypeError):
+                continue
+            if job.job_type != JobType.TRANSCRIPT or job.status != JobStatus.DOWNLOADING:
+                continue
+            if not job.updated_at:
+                continue
+            try:
+                updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            if updated < cutoff:
+                self.update_status(
+                    job.job_id,
+                    JobStatus.FAILED,
+                    error="stale: скачивание прервано (таймаут или перезапуск бота)",
+                )
+                failed += 1
+        if failed:
+            self.reconcile_queue_counter()
+        return failed
+
     def queue_full(self) -> bool:
         return self.queued_transcript_count() >= MAX_QUEUE_SIZE
 

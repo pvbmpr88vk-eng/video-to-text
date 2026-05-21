@@ -52,8 +52,11 @@ async def _post_init(application) -> None:
         rq_failed = sync_rq_failed_jobs(store)
         if rq_failed:
             logger.warning("Synced %s job(s) failed in RQ but stuck in store", rq_failed)
+        stale_dl = store.fail_stale_downloading_jobs(max_age_sec=600)
         stale = store.fail_stale_waiting_jobs(max_age_sec=3600)
         waiting = store.reconcile_queue_counter()
+        if stale_dl:
+            logger.warning("Marked %s stale downloading job(s) as failed", stale_dl)
         if stale:
             logger.warning("Marked %s stale transcript job(s) as failed", stale)
         logger.info("Queue reconciled: %s transcript job(s) waiting", waiting)
