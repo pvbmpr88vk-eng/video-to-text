@@ -20,10 +20,12 @@ from app.config import (
 )
 from app.jobs.models import JobStatus
 from app.jobs.paths import ensure_job_dirs
+from app.jobs.progress import ProgressReporter
 from app.jobs.store import JobStore
 from app.queue.rq_connection import get_redis
 from app.stt.chunks import resolve_workers
 from app.stt.exceptions import ModelNotAvailableError, TranscriptionError
+from app.stt.limits import audio_too_long_for_stt
 from app.stt.transcriber import transcribe_audio
 from app.summary.exceptions import SummaryError
 from app.summary.summarizer import summarize_transcript
@@ -53,6 +55,7 @@ def run_transcript_job(job_id: str) -> None:
         return
 
     t0 = time.monotonic()
+    progress = ProgressReporter(store, job_id)
     try:
         if not job.inbox_path:
             _fail(store, job_id, "inbox_path missing")
@@ -65,12 +68,23 @@ def run_transcript_job(job_id: str) -> None:
         _, work_dir, out_dir = ensure_job_dirs(job_id)
 
         store.update_status(job_id, JobStatus.EXTRACT)
+        progress.report(8.0, "Извлекаю аудио…", force=True)
         if store.is_cancelled(job_id):
             return
 
         wav = extract_audio(inbox, output_dir=work_dir)
         store.update_status(job_id, JobStatus.STT, wav_path=str(wav))
+        progress.report(12.0, "Распознаю речь…", force=True)
         if store.is_cancelled(job_id):
+            return
+
+        too_long, duration_sec = audio_too_long_for_stt(wav)
+        if too_long:
+            _fail(
+                store,
+                job_id,
+                f"audio_too_long:{duration_sec / 60:.0f}",
+            )
             return
 
         if store.is_cancelled(job_id):
@@ -88,7 +102,9 @@ def run_transcript_job(job_id: str) -> None:
             chunk_minutes=DEFAULT_CHUNK_MINUTES,
             workers=workers,
             keep_chunks=False,
+            progress_callback=lambda pct, label: progress.report(pct, label),
         )
+        progress.report(100.0, "Готово", force=True)
 
         if store.is_cancelled(job_id):
             logger.info("Transcript job %s was cancelled; skipping DONE", job_id)
@@ -160,8 +176,10 @@ def run_summary_job(job_id: str) -> None:
         )
         return
     t0 = time.monotonic()
+    progress = ProgressReporter(store, job_id)
     try:
         store.update_status(job_id, JobStatus.SUMMARY)
+        progress.report(5.0, "Готовлю тезисы…", force=True)
         if store.is_cancelled(job_id):
             return
 
@@ -173,7 +191,9 @@ def run_summary_job(job_id: str) -> None:
             with_quotes=False,
             model=OLLAMA_MODEL_DEFAULT,
             ollama_host=OLLAMA_HOST,
+            progress_callback=lambda pct, label: progress.report(pct, label),
         )
+        progress.report(100.0, "Тезисы готовы", force=True)
         store.update_status(
             job_id,
             JobStatus.DONE,

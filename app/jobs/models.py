@@ -48,6 +48,9 @@ class Job:
     llm_model: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    progress_pct: float | None = None
+    progress_eta_sec: float | None = None
+    progress_label: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +78,9 @@ class Job:
             "llm_model": self.llm_model,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "progress_pct": self.progress_pct,
+            "progress_eta_sec": self.progress_eta_sec,
+            "progress_label": self.progress_label,
         }
 
     @classmethod
@@ -104,10 +110,20 @@ class Job:
             llm_model=data.get("llm_model"),
             created_at=data.get("created_at") or "",
             updated_at=data.get("updated_at") or "",
+            progress_pct=_optional_float(data.get("progress_pct")),
+            progress_eta_sec=_optional_float(data.get("progress_eta_sec")),
+            progress_label=data.get("progress_label"),
         )
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
 
 
 def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+

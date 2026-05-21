@@ -4,10 +4,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
-if [[ -f docker-compose.dev.yml ]] && [[ "${DEPLOY_PROFILE:-}" == "dev" ]]; then
-  COMPOSE+=(-f docker-compose.dev.yml)
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source .env
+  set +a
 fi
+
+# shellcheck source=scripts/lib/compose-args.sh
+source "$ROOT/scripts/lib/compose-args.sh"
+read -r -a COMPOSE_FILES <<<"$(compose_files "$ROOT")"
+read -r -a PROFILE_ARGS <<<"$(compose_profile_args)"
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}" "${PROFILE_ARGS[@]}")
 
 fail() {
   echo "FAIL: $*" >&2
@@ -22,6 +30,15 @@ echo "=== redis ping ==="
 
 echo "=== bot health (skip ollama) ==="
 "${COMPOSE[@]}" exec -T bot python -m app health --skip-ollama || fail "bot health"
+
+if [[ -n "${TELEGRAM_BOT_API_BASE_URL:-}" ]] || "${COMPOSE[@]}" ps --status running 2>/dev/null | grep -q telegram-bot-api; then
+  echo "=== Local Bot API (telegram-bot-api) ==="
+  "${COMPOSE[@]}" ps telegram-bot-api 2>/dev/null | grep -q telegram-bot-api || fail "telegram-bot-api not running"
+  "${COMPOSE[@]}" exec -T telegram-bot-api sh -c \
+    'wget -q --server-response http://127.0.0.1:8081/ 2>&1 | grep -q HTTP/' \
+    || fail "telegram-bot-api not reachable on :8081"
+  echo "Local Bot API OK"
+fi
 
 echo "=== worker-transcript health ==="
 "${COMPOSE[@]}" exec -T worker-transcript python -m app health --skip-ollama \

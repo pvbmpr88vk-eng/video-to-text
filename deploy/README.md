@@ -51,7 +51,23 @@ docker compose exec -T worker-transcript python -c \
   "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 ```
 
-## 4. Maintenance
+## 4. Local Bot API (файлы >20 MB, TZ-09)
+
+Опционально, отдельный контейнер + автоочистка кэша (TTL 6 h по умолчанию).
+
+```bash
+# В .env добавить из deploy/env/local-bot-api.env.example:
+# TELEGRAM_API_ID, TELEGRAM_API_HASH (my.telegram.org)
+
+./scripts/up-with-local-bot-api.sh
+# или: ENABLE_LOCAL_BOT_API=1 ./scripts/deploy-remote.sh
+
+./scripts/telegram-bot-api-cleanup.sh 6   # ручная очистка при необходимости
+```
+
+Подробно: [docs/TZ-09-local-bot-api.md](../docs/TZ-09-local-bot-api.md).
+
+## 5. Maintenance
 
 ```bash
 docker compose logs -f bot

@@ -22,8 +22,10 @@ from app.jobs.events import JOB_EVENTS_CHANNEL
 from app.jobs.models import Job, JobStatus, JobType
 from app.jobs.store import JobStore
 from app.telegram import messages as M
+from app.telegram.files import document_upload_file
 from app.telegram.formatting import format_summary_for_chat, split_telegram_message
 from app.telegram.jobs import CALLBACK_THESES_PREFIX
+from app.telegram.progress_text import format_job_status_message, format_theses_caption_progress
 from app.telegram.queue_msg import format_queue_accept_message
 
 logger = logging.getLogger(__name__)
@@ -32,8 +34,8 @@ STATUS_TEXT = {
     JobStatus.QUEUED: "В очереди…",
     JobStatus.DOWNLOADING: "Скачиваю файл…",
     JobStatus.EXTRACT: "Извлекаю аудио…",
-    JobStatus.STT: "Распознаю речь (CPU, может занять долго)…",
-    JobStatus.SUMMARY: M.SUMMARY_STARTED,
+    JobStatus.STT: "Распознавание",
+    JobStatus.SUMMARY: "Тезисы",
 }
 
 
@@ -58,6 +60,8 @@ def _error_message(code: str) -> str:
         return M.URL_DOWNLOAD_FAILED.format(detail=code.removeprefix("url_download:").strip())
     if code == "file_too_large":
         return M.FILE_TOO_LARGE_HINT.format(limit_mb=telegram_file_limit_mb())
+    if code == "telegram_download_timeout":
+        return M.TELEGRAM_DOWNLOAD_TIMEOUT
     if code == "telegram_download":
         return M.TELEGRAM_DOWNLOAD_FAILED
     if code == "no_audio":
@@ -66,6 +70,17 @@ def _error_message(code: str) -> str:
         return M.ERR_FFMPEG_MISSING
     if code == "stt_model":
         return M.ERR_STT_MODEL
+    if code.startswith("audio_too_long:"):
+        try:
+            minutes = float(code.split(":", 1)[1])
+        except ValueError:
+            minutes = 0.0
+        from app.config import STT_MAX_AUDIO_DURATION_MINUTES
+
+        return M.ERR_AUDIO_TOO_LONG.format(
+            minutes=minutes,
+            limit_min=STT_MAX_AUDIO_DURATION_MINUTES,
+        )
     if code.startswith("stt:"):
         return f"{M.ERR_STT} ({code[4:]})"
     if code.startswith("ffmpeg:"):
@@ -169,10 +184,11 @@ async def mark_theses_button_processing(
     except Exception:
         logger.debug("Could not remove theses button", exc_info=True)
     try:
+        caption = f"{M.TRANSCRIPT_CAPTION}\n⏳ Тезисы: 5%"
         await app.bot.edit_message_caption(
             chat_id=chat_id,
             message_id=message_id,
-            caption=M.TRANSCRIPT_THESES_PROCESSING,
+            caption=caption,
         )
     except Exception:
         logger.debug("Could not set theses processing caption", exc_info=True)
@@ -245,7 +261,9 @@ async def _handle_job_event(app: Application, job_id: str) -> None:
         track = tracked.get(job.parent_job_id)
 
     if job.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING, JobStatus.EXTRACT, JobStatus.STT, JobStatus.SUMMARY):
-        if job.job_type != JobType.SUMMARY:
+        if job.job_type == JobType.SUMMARY:
+            await _maybe_edit_summary_progress(app, job, track)
+        else:
             await _maybe_edit_status(app, job, track)
         return
 
@@ -271,10 +289,8 @@ async def _maybe_edit_status(app: Application, job: Job, track: TrackedJob | Non
     now = time.monotonic()
     if now - track.last_edit_at < TELEGRAM_STATUS_EDIT_MIN_SEC:
         return
-    text = STATUS_TEXT.get(job.status, "Обработка…")
-    if job.status == JobStatus.QUEUED:
-        store: JobStore = app.bot_data["job_store"]
-        text = format_queue_accept_message(store)
+    store: JobStore = app.bot_data["job_store"]
+    text = format_job_status_message(job, store)
     try:
         await app.bot.edit_message_text(
             chat_id=track.chat_id,
@@ -286,32 +302,74 @@ async def _maybe_edit_status(app: Application, job: Job, track: TrackedJob | Non
         logger.debug("status edit failed for job %s", job.job_id, exc_info=True)
 
 
+async def _maybe_edit_summary_progress(
+    app: Application, job: Job, track: TrackedJob | None
+) -> None:
+    parent_id = job.parent_job_id or job.job_id
+    tracked: dict[str, TrackedJob] = app.bot_data.get("tracked_jobs", {})
+    parent_track = tracked.get(parent_id) or track
+    if not parent_track or not parent_track.theses_message_id:
+        return
+    now = time.monotonic()
+    if now - parent_track.last_edit_at < TELEGRAM_STATUS_EDIT_MIN_SEC:
+        return
+    caption = format_theses_caption_progress(job)
+    try:
+        await app.bot.edit_message_caption(
+            chat_id=parent_track.chat_id,
+            message_id=parent_track.theses_message_id,
+            caption=caption,
+        )
+        parent_track.last_edit_at = now
+    except Exception:
+        logger.debug("summary caption edit failed for job %s", job.job_id, exc_info=True)
+
+
 async def _deliver_transcript(app: Application, job: Job, track: TrackedJob | None) -> None:
     redis = app.bot_data["redis"]
     if was_telegram_delivered(redis, job.job_id, "transcript"):
         logger.info("Skip duplicate transcript delivery for job %s", job.job_id)
         return
     chat_id = track.chat_id if track else job.chat_id
+    reply_to = track.reply_to_message_id if track else job.message_id
+
+    txt_path = Path(job.transcript_txt) if job.transcript_txt else None
+    if not txt_path or not txt_path.is_file():
+        await app.bot.send_message(chat_id, "Транскрипт не найден на диске.")
+        mark_telegram_delivered(redis, job.job_id, "transcript")
+        return
+
+    try:
+        doc = await app.bot.send_document(
+            chat_id=chat_id,
+            document=document_upload_file(txt_path),
+            caption=M.TRANSCRIPT_CAPTION,
+            reply_markup=_theses_keyboard(job.job_id),
+            reply_to_message_id=reply_to,
+        )
+    except Exception:
+        logger.exception("Failed to send transcript for job %s", job.job_id)
+        if track and track.status_message_id:
+            try:
+                await app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=track.status_message_id,
+                    text=M.TRANSCRIPT_SEND_FAILED,
+                )
+            except Exception:
+                await app.bot.send_message(chat_id, M.TRANSCRIPT_SEND_FAILED, reply_to_message_id=reply_to)
+        else:
+            await app.bot.send_message(chat_id, M.TRANSCRIPT_SEND_FAILED, reply_to_message_id=reply_to)
+        return
+
     if track and track.status_message_id:
         try:
             await app.bot.delete_message(chat_id=chat_id, message_id=track.status_message_id)
         except Exception:
             logger.debug("Could not delete status message", exc_info=True)
 
-    txt_path = Path(job.transcript_txt) if job.transcript_txt else None
-    if txt_path and txt_path.is_file():
-        doc = await app.bot.send_document(
-            chat_id=chat_id,
-            document=str(txt_path.resolve()),
-            caption=M.TRANSCRIPT_CAPTION,
-            reply_markup=_theses_keyboard(job.job_id),
-            reply_to_message_id=track.reply_to_message_id if track else job.message_id,
-        )
-        track_theses_message(app, job.job_id, doc.message_id)
-        mark_telegram_delivered(redis, job.job_id, "transcript")
-    else:
-        await app.bot.send_message(chat_id, "Транскрипт не найден на диске.")
-        mark_telegram_delivered(redis, job.job_id, "transcript")
+    track_theses_message(app, job.job_id, doc.message_id)
+    mark_telegram_delivered(redis, job.job_id, "transcript")
 
 
 def _summary_track(app: Application, job: Job, track: TrackedJob | None) -> TrackedJob | None:

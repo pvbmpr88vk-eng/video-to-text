@@ -37,18 +37,6 @@ class JobStore:
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
-    def save(self, job: Job, *, publish: bool = True) -> None:
-        job.updated_at = self._now()
-        self._redis.set(self._key(job.job_id), json.dumps(job.to_dict(), ensure_ascii=False))
-        self._redis.sadd(f"{USER_JOBS_PREFIX}{job.user_id}", job.job_id)
-        if publish:
-            publish_job_event(
-                self._redis,
-                job_id=job.job_id,
-                event="status_changed",
-                extra={"status": job.status.value},
-            )
-
     def create(
         self,
         *,
@@ -118,6 +106,35 @@ class JobStore:
         ):
             self._redis.decr(QUEUE_COUNTER_KEY)
         return job
+
+    def update_progress(
+        self,
+        job_id: str,
+        *,
+        pct: float,
+        label: str,
+        eta_sec: float | None = None,
+        publish: bool = True,
+    ) -> Job | None:
+        job = self.get(job_id)
+        if not job:
+            return None
+        job.progress_pct = round(float(pct), 1)
+        job.progress_label = label
+        job.progress_eta_sec = round(float(eta_sec), 1) if eta_sec is not None else None
+        self.save(job, publish=publish, event="progress_changed")
+
+    def save(self, job: Job, *, publish: bool = True, event: str = "status_changed") -> None:
+        job.updated_at = self._now()
+        self._redis.set(self._key(job.job_id), json.dumps(job.to_dict(), ensure_ascii=False))
+        self._redis.sadd(f"{USER_JOBS_PREFIX}{job.user_id}", job.job_id)
+        if publish:
+            publish_job_event(
+                self._redis,
+                job_id=job.job_id,
+                event=event,
+                extra={"status": job.status.value},
+            )
 
     def set_rq_job_id(self, job_id: str, rq_job_id: str) -> None:
         job = self.get(job_id)

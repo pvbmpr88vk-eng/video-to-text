@@ -7,7 +7,7 @@ import sys
 import httpx
 
 from app.audio.ffmpeg import require_ffmpeg_tools
-from app.config import OLLAMA_HOST, REDIS_URL
+from app.config import OLLAMA_HOST, REDIS_URL, TELEGRAM_BOT_API_BASE_URL
 from app.queue.rq_connection import get_redis
 
 logger = logging.getLogger(__name__)
@@ -55,5 +55,18 @@ def run_health_check(*, check_ollama: bool = True) -> int:
     except ImportError:
         logger.error("yt-dlp not installed (required for URL download in bot)")
         ok = False
+
+    if TELEGRAM_BOT_API_BASE_URL:
+        ping_url = TELEGRAM_BOT_API_BASE_URL.rstrip("/")
+        try:
+            r = httpx.get(ping_url, timeout=5.0)
+            if r.status_code < 500:
+                logger.info("Local Bot API OK (%s)", ping_url)
+            else:
+                logger.error("Local Bot API HTTP %s at %s", r.status_code, ping_url)
+                ok = False
+        except Exception as exc:
+            logger.error("Local Bot API unreachable at %s: %s", ping_url, exc)
+            ok = False
 
     return 0 if ok else 1

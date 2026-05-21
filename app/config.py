@@ -19,14 +19,31 @@ TELEGRAM_ENABLE_SUMMARY = os.environ.get("TELEGRAM_ENABLE_SUMMARY", "true").lowe
 )
 TELEGRAM_MESSAGE_MAX_LEN = 4096
 _APP_ENV = os.environ.get("APP_ENV", "").strip().lower()
-# Прод / Docker: 20 MB (лимит стандартного Telegram Bot API). Локальный test: 500 MB.
-_DEFAULT_TELEGRAM_FILE_LIMIT = (
-    500 * 1024 * 1024 if _APP_ENV == "test" else 20_000_000
-)
+TELEGRAM_BOT_API_BASE_URL = os.environ.get("TELEGRAM_BOT_API_BASE_URL", "").strip().rstrip("/")
+TELEGRAM_BOT_API_CACHE_TTL_HOURS = int(os.environ.get("TELEGRAM_BOT_API_CACHE_TTL_HOURS", "6"))
+_USE_LOCAL_BOT_API = bool(TELEGRAM_BOT_API_BASE_URL)
+# Прод cloud API: 20 MB. Local Bot API или APP_ENV=test: 500 MB.
+_DEFAULT_TELEGRAM_FILE_LIMIT = 20_000_000
+if _USE_LOCAL_BOT_API or _APP_ENV == "test":
+    _DEFAULT_TELEGRAM_FILE_LIMIT = 500 * 1024 * 1024
 TELEGRAM_BOT_FILE_SIZE_LIMIT = int(
     os.environ.get("TELEGRAM_BOT_FILE_SIZE_LIMIT", str(_DEFAULT_TELEGRAM_FILE_LIMIT))
 )
 TELEGRAM_STATUS_EDIT_MIN_SEC = 30.0
+# Min interval between Telegram progress edits (worker publishes; bot throttles edits too).
+TELEGRAM_PROGRESS_MIN_INTERVAL_SEC = float(
+    os.environ.get("TELEGRAM_PROGRESS_MIN_INTERVAL_SEC", str(TELEGRAM_STATUS_EDIT_MIN_SEC))
+)
+# PTB default read timeout is 5s — too short for 200+ MB via Local Bot API.
+_DEFAULT_TELEGRAM_HTTP_READ_TIMEOUT = 30.0
+if _USE_LOCAL_BOT_API:
+    _DEFAULT_TELEGRAM_HTTP_READ_TIMEOUT = 3600.0
+TELEGRAM_HTTP_READ_TIMEOUT_SEC = float(
+    os.environ.get("TELEGRAM_HTTP_READ_TIMEOUT_SEC", str(_DEFAULT_TELEGRAM_HTTP_READ_TIMEOUT))
+)
+TELEGRAM_HTTP_WRITE_TIMEOUT_SEC = float(
+    os.environ.get("TELEGRAM_HTTP_WRITE_TIMEOUT_SEC", str(TELEGRAM_HTTP_READ_TIMEOUT_SEC))
+)
 
 
 def telegram_file_limit_mb() -> float:
@@ -50,9 +67,14 @@ WHISPER_MODEL_DEFAULT = os.environ.get("WHISPER_MODEL", "small")
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 
-DEFAULT_CHUNK_MINUTES = 10.0
+DEFAULT_CHUNK_MINUTES = float(os.environ.get("STT_CHUNK_MINUTES", "10"))
 DEFAULT_MAX_WORKERS = 4
 LONG_AUDIO_WARN_MINUTES = 30.0
+# Above this length: split into chunks and transcribe sequentially (fits 4 GB VPS).
+STT_CHUNK_WHEN_ABOVE_MINUTES = float(os.environ.get("STT_CHUNK_WHEN_ABOVE_MINUTES", "12"))
+# Hard reject before STT (0 = no limit).
+STT_MAX_AUDIO_DURATION_MINUTES = float(os.environ.get("STT_MAX_AUDIO_DURATION_MINUTES", "55"))
+WHISPER_BEAM_SIZE = int(os.environ.get("WHISPER_BEAM_SIZE", "1"))
 STT_PROGRESS_SEGMENT_INTERVAL = 50
 
 SAMPLE_RATE = 16_000

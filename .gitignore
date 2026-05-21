@@ -30,6 +30,9 @@ transcripts/
 
 # SSH (private key must not be committed)
 ssh-keys/id_ed25519
+ssh-keys/*
+!ssh-keys/.gitkeep
+!ssh-keys/id_ed25519.pub
 
 # OS & IDE
 .DS_Store

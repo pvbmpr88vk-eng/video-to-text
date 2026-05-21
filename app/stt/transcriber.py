@@ -4,14 +4,19 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+ProgressCallback = Callable[[float, str], None]
 
 from app.config import (
     DEFAULT_CHUNK_MINUTES,
     DEFAULT_TRANSCRIPT_DIR,
     LONG_AUDIO_WARN_MINUTES,
+    STT_CHUNK_WHEN_ABOVE_MINUTES,
     STT_PROGRESS_SEGMENT_INTERVAL,
+    WHISPER_BEAM_SIZE,
     WHISPER_COMPUTE_TYPE,
     WHISPER_DEVICE,
     WHISPER_MODEL_DEFAULT,
@@ -27,7 +32,7 @@ from app.stt.chunks import (
     transcribe_chunks_parallel,
 )
 from app.stt.exceptions import ModelNotAvailableError, TranscriptionError
-from app.stt.models import Segment
+from app.stt.models import ChunkResult, Segment
 from app.utils.paths import build_output_basename, ensure_dir
 
 logger = logging.getLogger(__name__)
@@ -87,7 +92,7 @@ def _run_transcription(
     segments_iter, info = model.transcribe(
         str(audio_path),
         language=language,
-        beam_size=5,
+        beam_size=WHISPER_BEAM_SIZE,
         vad_filter=True,
     )
     segments: list[Segment] = []
@@ -168,6 +173,89 @@ def _write_outputs(
     return txt_path, json_path
 
 
+def _audio_duration_sec(source: Path) -> float:
+    duration = read_duration_from_sidecar(source)
+    if duration is None:
+        try:
+            duration = probe_audio_duration(source)
+        except Exception:
+            duration = 0.0
+    return float(duration or 0.0)
+
+
+def _should_chunk_sequential(source: Path) -> bool:
+    limit_sec = STT_CHUNK_WHEN_ABOVE_MINUTES * 60.0
+    if limit_sec <= 0:
+        return False
+    return _audio_duration_sec(source) > limit_sec
+
+
+def _transcribe_sequential_chunks(
+    source: Path,
+    *,
+    out_dir: Path,
+    basename: str,
+    model_size: str,
+    language: str | None,
+    chunk_minutes: float,
+    keep_chunks: bool,
+    progress_callback: ProgressCallback | None = None,
+) -> tuple[list[Segment], str, str, float]:
+    """One Whisper model, chunks one-by-one — low RAM for long files on small VPS."""
+    chunk_duration_sec = chunk_minutes * 60.0
+    total_duration = _log_duration_hint(source)
+    work_dir = chunk_work_dir(out_dir, basename)
+    try:
+        chunk_specs = split_audio_into_chunks(
+            source,
+            work_dir,
+            chunk_duration_sec=chunk_duration_sec,
+        )
+        model = _load_whisper_model(model_size)
+        chunk_results: list[ChunkResult] = []
+        total_chunks = len(chunk_specs)
+        for spec in chunk_specs:
+            if progress_callback:
+                pct = 12.0 + 78.0 * (spec.index / max(total_chunks, 1))
+                progress_callback(pct, "Распознавание")
+            segments, text, _duration, detected_lang = _run_transcription(
+                model,
+                spec.path,
+                language=language,
+            )
+            for segment in segments:
+                segment.start += spec.start_sec
+                segment.end += spec.start_sec
+            chunk_results.append(
+                ChunkResult(
+                    index=spec.index,
+                    segments=segments,
+                    text=text,
+                    language=detected_lang,
+                    duration_sec=spec.duration_sec,
+                )
+            )
+            if progress_callback:
+                pct = 12.0 + 78.0 * ((spec.index + 1) / max(total_chunks, 1))
+                progress_callback(pct, "Распознавание")
+            logger.info(
+                "Sequential chunk %d/%d done (%s)",
+                spec.index + 1,
+                total_chunks,
+                spec.path.name,
+            )
+        if progress_callback:
+            progress_callback(92.0, "Сохраняю транскрипт…")
+        segments, text, detected_lang = merge_chunk_results(
+            chunk_results,
+            total_duration_sec=total_duration,
+        )
+        return segments, text, detected_lang, total_duration
+    finally:
+        if not keep_chunks:
+            cleanup_chunk_dir(work_dir)
+
+
 def _transcribe_parallel(
     source: Path,
     *,
@@ -217,6 +305,7 @@ def transcribe_audio(
     chunk_minutes: float = DEFAULT_CHUNK_MINUTES,
     workers: int | None = None,
     keep_chunks: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> TranscriptionResult:
     """
     Transcribe audio to text using faster-whisper on CPU.
@@ -237,10 +326,18 @@ def transcribe_audio(
     basename = build_output_basename(source)
     worker_count = resolve_workers(workers) if parallel else 1
 
-    logger.info("Transcribing %s (parallel=%s)", source, parallel)
+    use_parallel = parallel and worker_count > 1
+    use_sequential_chunks = _should_chunk_sequential(source)
+    logger.info(
+        "Transcribing %s (parallel=%s, sequential_chunks=%s, workers=%s)",
+        source,
+        use_parallel,
+        use_sequential_chunks and not use_parallel,
+        worker_count,
+    )
 
-    if parallel:
-        try:
+    try:
+        if use_parallel:
             segments, text, detected_lang, duration = _transcribe_parallel(
                 source,
                 out_dir=out_dir,
@@ -251,23 +348,31 @@ def transcribe_audio(
                 workers=workers,
                 keep_chunks=keep_chunks,
             )
-        except ModelNotAvailableError:
-            raise
-        except Exception as exc:
-            raise TranscriptionError(f"Parallel transcription failed: {exc}") from exc
-    else:
-        _log_duration_hint(source)
-        model = _load_whisper_model(model_size)
-        try:
+        elif use_sequential_chunks:
+            segments, text, detected_lang, duration = _transcribe_sequential_chunks(
+                source,
+                out_dir=out_dir,
+                basename=basename,
+                model_size=model_size,
+                language=language,
+                chunk_minutes=chunk_minutes,
+                keep_chunks=keep_chunks,
+                progress_callback=progress_callback,
+            )
+        else:
+            if progress_callback:
+                progress_callback(20.0, "Распознавание")
+            _log_duration_hint(source)
+            model = _load_whisper_model(model_size)
             segments, text, duration, detected_lang = _run_transcription(
                 model,
                 source,
                 language=language,
             )
-        except ModelNotAvailableError:
-            raise
-        except Exception as exc:
-            raise TranscriptionError(f"Transcription failed: {exc}") from exc
+    except ModelNotAvailableError:
+        raise
+    except Exception as exc:
+        raise TranscriptionError(f"Transcription failed: {exc}") from exc
 
     result = TranscriptionResult(
         text=text,
@@ -278,7 +383,7 @@ def transcribe_audio(
         segments=segments,
         model=model_size,
         source_path=str(source),
-        parallel=parallel,
+        parallel=use_parallel,
         workers=worker_count,
     )
     result.txt_path, result.json_path = _write_outputs(

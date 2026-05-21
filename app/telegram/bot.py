@@ -6,7 +6,13 @@ import sys
 
 import httpx
 
-from app.config import JOB_QUEUE_ENABLED, OLLAMA_HOST
+from app.config import (
+    JOB_QUEUE_ENABLED,
+    OLLAMA_HOST,
+    TELEGRAM_BOT_API_BASE_URL,
+    TELEGRAM_HTTP_READ_TIMEOUT_SEC,
+    TELEGRAM_HTTP_WRITE_TIMEOUT_SEC,
+)
 from app.jobs.store import JobStore
 from app.queue.rq_connection import get_redis
 from app.telegram.auth import MediaRateLimiter
@@ -40,7 +46,12 @@ async def _post_init(application) -> None:
         logger.debug("get_me failed at startup", exc_info=True)
 
     if JOB_QUEUE_ENABLED:
+        from app.jobs.reconcile import sync_rq_failed_jobs
+
         store: JobStore = application.bot_data["job_store"]
+        rq_failed = sync_rq_failed_jobs(store)
+        if rq_failed:
+            logger.warning("Synced %s job(s) failed in RQ but stuck in store", rq_failed)
         stale = store.fail_stale_waiting_jobs(max_age_sec=3600)
         waiting = store.reconcile_queue_counter()
         if stale:
@@ -104,12 +115,29 @@ def run_bot(*, verbose: bool = False) -> None:
 
     from telegram.ext import Application
 
-    application = (
+    builder = (
         Application.builder()
         .token(creds.bot_token)
-        .post_init(_post_init)
-        .post_shutdown(_post_shutdown)
-        .build()
+        .connect_timeout(30.0)
+        .read_timeout(TELEGRAM_HTTP_READ_TIMEOUT_SEC)
+        .write_timeout(TELEGRAM_HTTP_WRITE_TIMEOUT_SEC)
+        .pool_timeout(30.0)
+        .get_updates_read_timeout(30.0)
+        .get_updates_write_timeout(30.0)
+    )
+    if TELEGRAM_BOT_API_BASE_URL:
+        base = TELEGRAM_BOT_API_BASE_URL
+        if not base.endswith("/bot"):
+            base = f"{base}/bot"
+        builder = builder.base_url(base).local_mode(True)
+        logger.info(
+            "Using Local Bot API at %s (local_mode=True, read_timeout=%ss)",
+            base,
+            TELEGRAM_HTTP_READ_TIMEOUT_SEC,
+        )
+
+    application = (
+        builder.post_init(_post_init).post_shutdown(_post_shutdown).build()
     )
     application.bot_data["creds"] = creds
     application.bot_data["rate_limiter"] = MediaRateLimiter()

@@ -246,6 +246,8 @@ docker compose logs -f bot
 
 **VPS 2 vCPU / 4 GB RAM:** Ollama на **хосте** (не в Docker), лимиты в `deploy/env/minimal-4gb.env`. Подробно: [deploy/README.md](deploy/README.md), [ТЗ-08](docs/TZ-08-docker-deploy.md).
 
+**Файлы >20 MB в Telegram:** опционально [ТЗ-09 Local Bot API](docs/TZ-09-local-bot-api.md) (`docker-compose.local-bot-api.yml`, очистка кэша).
+
 Проверка инфраструктуры:
 
 ```bash

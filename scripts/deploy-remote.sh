@@ -27,8 +27,10 @@ echo "=== Prepare ${APP_DIR} on server ==="
 echo "=== Rsync project (private repo — no git clone on server) ==="
 RSYNC=(rsync -avz --delete
   --exclude '.venv' --exclude 'output' --exclude '.git' --exclude '__pycache__'
+  --exclude '.env' --exclude '.env.local'
+  --exclude 'telegram-bot.access.test.txt'
   --exclude 'ssh-keys/id_ed25519' --exclude '.clt-install')
-"${RSYNC[@]}" -e "ssh -i ${KEY} -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30" \
+"${RSYNC[@]}" -e "ssh -i \"${KEY}\" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30" \
   "${ROOT}/" "${DEPLOY_USER}@${DEPLOY_HOST}:${APP_DIR}/"
 
 echo "=== Ollama on host (listen 0.0.0.0 for Docker) ==="
@@ -63,18 +65,23 @@ else
 fi
 
 echo "=== Docker compose up ==="
+ENABLE_LOCAL_BOT_API="${ENABLE_LOCAL_BOT_API:-0}"
 "${SSH[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<REMOTE
 set -euo pipefail
 cd ${APP_DIR}
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API}
+source scripts/lib/compose-args.sh
+read -r -a COMPOSE_FILES <<<"\$(compose_files "\${PWD}")"
+read -r -a PROFILE_ARGS <<<"\$(compose_profile_args)"
+docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" up -d --build
 ./scripts/fix-docker-volumes.sh
 echo "=== Warm up Whisper model (small) ==="
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T worker-transcript python -c \
+docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" exec -T worker-transcript python -c \
   "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8'); print('whisper ok')"
-docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T redis redis-cli DEL bot:telegram:polling 2>/dev/null || true
-docker compose -f docker-compose.yml -f docker-compose.prod.yml restart bot
+docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" exec -T redis redis-cli DEL bot:telegram:polling 2>/dev/null || true
+docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" restart bot
 sleep 5
-./scripts/deploy-check.sh
+WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API} ./scripts/deploy-check.sh
 REMOTE
 
 echo "NOTE: stop any other bot instance (local Mac) to avoid Telegram 409 Conflict."

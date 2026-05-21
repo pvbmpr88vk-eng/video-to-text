@@ -5,8 +5,11 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+SummaryProgressCallback = Callable[[float, str], None]
 
 from app.config import (
     DEFAULT_SUMMARY_DIR,
@@ -131,6 +134,7 @@ def _run_map_reduce(
     text: str,
     segments: list[dict] | None,
     model: str,
+    progress_callback: SummaryProgressCallback | None = None,
 ) -> dict[str, Any]:
     chunks = split_transcript_text(
         text,
@@ -142,16 +146,24 @@ def _run_map_reduce(
     logger.info("Summary map-reduce: %d chunk(s), model=%s", total, model)
 
     if total == 1:
-        return _finalize_with_grounding(
+        if progress_callback:
+            progress_callback(50.0, "Тезисы")
+        result = _finalize_with_grounding(
             client,
             transcript=text,
             system=REDUCE_SYSTEM_RU,
             user=f"Полный транскрипт:\n\n{chunks[0].text}",
             model=model,
         )
+        if progress_callback:
+            progress_callback(100.0, "Тезисы готовы")
+        return result
 
     partials: list[str] = []
     for chunk in chunks:
+        if progress_callback:
+            pct = 10.0 + 75.0 * (chunk.index / max(total, 1))
+            progress_callback(pct, "Тезисы")
         logger.info("Map chunk %d/%d", chunk.index + 1, total)
         part = _map_chunk_with_grounding(
             client,
@@ -169,15 +181,23 @@ def _run_map_reduce(
                 ensure_ascii=False,
             )
         )
+        if progress_callback:
+            pct = 10.0 + 75.0 * ((chunk.index + 1) / max(total, 1))
+            progress_callback(pct, "Тезисы")
 
+    if progress_callback:
+        progress_callback(88.0, "Тезисы")
     logger.info("Reduce step")
-    return _finalize_with_grounding(
+    result = _finalize_with_grounding(
         client,
         transcript=text,
         system=REDUCE_SYSTEM_RU,
         user=reduce_user_message("\n\n".join(partials)),
         model=model,
     )
+    if progress_callback:
+        progress_callback(100.0, "Тезисы готовы")
+    return result
 
 
 def _normalize_final(data: dict[str, Any]) -> dict[str, Any]:
@@ -200,6 +220,7 @@ def summarize_transcript(
     with_quotes: bool = False,
     model: str | None = None,
     ollama_host: str | None = None,
+    progress_callback: SummaryProgressCallback | None = None,
 ) -> SummaryResult:
     source = Path(transcript_path).expanduser().resolve()
     if not source.is_file():
@@ -225,7 +246,13 @@ def summarize_transcript(
 
     started = time.monotonic()
     segments = payload.get("segments") if isinstance(payload.get("segments"), list) else None
-    final = _run_map_reduce(client, text=text, segments=segments, model=model_name)
+    final = _run_map_reduce(
+        client,
+        text=text,
+        segments=segments,
+        model=model_name,
+        progress_callback=progress_callback,
+    )
     if not with_quotes:
         final["quotes"] = []
 

@@ -31,9 +31,8 @@ brew services start redis 2>/dev/null || true
 redis-cli ping
 
 echo "=== stopping old local bot/workers ==="
-pkill -9 -f "python -m app worker" 2>/dev/null || true
-pkill -9 -f "python -m app bot" 2>/dev/null || true
-sleep 2
+# shellcheck source=lib/stop-local-processes.sh
+source "$ROOT/scripts/lib/stop-local-processes.sh" "$ROOT"
 
 python -m app jobs reset-stuck
 python -c "from app.queue.workers_cleanup import prune_dead_workers; print('Dead RQ workers removed:', prune_dead_workers())"

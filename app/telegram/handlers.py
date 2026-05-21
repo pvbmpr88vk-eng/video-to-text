@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from telegram import Message, Update
-from telegram.error import BadRequest, NetworkError, TimedOut
+from telegram.error import BadRequest, InvalidToken, NetworkError, TimedOut
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -25,6 +25,7 @@ from app.config import (
     URL_DOWNLOAD_MAX_BYTES,
     telegram_file_limit_mb,
 )
+from app.telegram.download import save_telegram_file
 from app.download.url import UrlDownloadError, download_media_url, extract_url
 from app.jobs.models import JobStatus, JobType
 from app.jobs.paths import ensure_job_dirs, job_inbox_dir
@@ -334,7 +335,7 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             return
 
-        await tg_file.download_to_drive(custom_path=str(dest))
+        await save_telegram_file(tg_file, dest)
         if not dest.is_file() or dest.stat().st_size == 0:
             raise OSError(f"download empty or missing: {dest}")
 
@@ -356,12 +357,32 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             code = "file_too_large" if "too big" in err or "file is too large" in err else "telegram_download"
             store.update_status(job_id, JobStatus.FAILED, error=code)
         if "too big" in err or "file is too large" in err:
-            await message.reply_text(
-                M.FILE_TOO_LARGE_HINT.format(limit_mb=telegram_file_limit_mb())
-            )
+            size_mb = (file_size / 1e6) if file_size else None
+            if size_mb is not None and size_mb <= 25 and telegram_file_limit_mb() > 100:
+                await message.reply_text(
+                    M.TELEGRAM_FILE_TOO_BIG_API.format(size_mb=size_mb)
+                )
+            else:
+                size_hint = f" ({size_mb:.0f} MB)" if size_mb is not None else ""
+                await message.reply_text(
+                    M.FILE_TOO_LARGE_HINT.format(
+                        size_hint=size_hint,
+                        limit_mb=telegram_file_limit_mb(),
+                    )
+                )
         else:
             await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
-    except (TimedOut, NetworkError) as exc:
+    except InvalidToken as exc:
+        logger.warning("Telegram file download URL error: %s", exc)
+        if job_id and store.get(job_id):
+            store.update_status(job_id, JobStatus.FAILED, error="telegram_download")
+        await message.reply_text(M.TELEGRAM_DOWNLOAD_FAILED)
+    except TimedOut as exc:
+        logger.warning("Telegram download timed out: %s", exc)
+        if job_id and store.get(job_id):
+            store.update_status(job_id, JobStatus.FAILED, error="telegram_download_timeout")
+        await message.reply_text(M.TELEGRAM_DOWNLOAD_TIMEOUT)
+    except NetworkError as exc:
         logger.warning("Telegram download network error: %s", exc)
         if job_id and store.get(job_id):
             store.update_status(job_id, JobStatus.FAILED, error="telegram_download")

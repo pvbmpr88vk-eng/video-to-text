@@ -59,6 +59,13 @@ def run_worker(kind: str, *, verbose: bool = False) -> None:
 
     for name in queue_names:
         promote_scheduled_jobs(name, conn)
+    if kind == "transcript":
+        from app.jobs.reconcile import sync_rq_failed_jobs
+        from app.jobs.store import JobStore
+
+        synced = sync_rq_failed_jobs(JobStore(conn))
+        if synced:
+            logger.warning("Synced %s stuck transcript job(s) from failed RQ state", synced)
     if kind == "summary":
         from app.jobs.store import JobStore
         from app.queue.tasks import SUMMARY_INFLIGHT_KEY
