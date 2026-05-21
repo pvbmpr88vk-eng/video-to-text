@@ -18,8 +18,20 @@ TELEGRAM_ENABLE_SUMMARY = os.environ.get("TELEGRAM_ENABLE_SUMMARY", "true").lowe
     "yes",
 )
 TELEGRAM_MESSAGE_MAX_LEN = 4096
-TELEGRAM_BOT_FILE_SIZE_LIMIT = 20_000_000
+_APP_ENV = os.environ.get("APP_ENV", "").strip().lower()
+# Прод / Docker: 20 MB (лимит стандартного Telegram Bot API). Локальный test: 500 MB.
+_DEFAULT_TELEGRAM_FILE_LIMIT = (
+    500 * 1024 * 1024 if _APP_ENV == "test" else 20_000_000
+)
+TELEGRAM_BOT_FILE_SIZE_LIMIT = int(
+    os.environ.get("TELEGRAM_BOT_FILE_SIZE_LIMIT", str(_DEFAULT_TELEGRAM_FILE_LIMIT))
+)
 TELEGRAM_STATUS_EDIT_MIN_SEC = 30.0
+
+
+def telegram_file_limit_mb() -> float:
+    """Лимит размера файла из Telegram для сообщений пользователю (как в handlers: /1e6)."""
+    return TELEGRAM_BOT_FILE_SIZE_LIMIT / 1_000_000
 
 # URL download (TZ-06, yt-dlp) — larger than Telegram 20 MB limit
 URL_DOWNLOAD_MAX_BYTES = int(os.environ.get("URL_DOWNLOAD_MAX_BYTES", str(500 * 1024 * 1024)))

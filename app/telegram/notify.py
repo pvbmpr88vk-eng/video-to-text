@@ -11,7 +11,7 @@ from pathlib import Path
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 
-from app.config import MAX_QUEUE_SIZE, TELEGRAM_STATUS_EDIT_MIN_SEC
+from app.config import MAX_QUEUE_SIZE, TELEGRAM_STATUS_EDIT_MIN_SEC, telegram_file_limit_mb
 from app.jobs.delivery import (
     claim_telegram_delivery,
     clear_telegram_delivery,
@@ -56,6 +56,10 @@ def _theses_keyboard(job_id: str) -> InlineKeyboardMarkup:
 def _error_message(code: str) -> str:
     if code.startswith("url_download:"):
         return M.URL_DOWNLOAD_FAILED.format(detail=code.removeprefix("url_download:").strip())
+    if code == "file_too_large":
+        return M.FILE_TOO_LARGE_HINT.format(limit_mb=telegram_file_limit_mb())
+    if code == "telegram_download":
+        return M.TELEGRAM_DOWNLOAD_FAILED
     if code == "no_audio":
         return M.ERR_NO_AUDIO
     if code == "ffmpeg_missing":

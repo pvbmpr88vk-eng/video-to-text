@@ -1,0 +1,7 @@
+# Тестовый бот (локальная разработка) — скопируйте в telegram-bot.access.test.txt
+# Прод-бот на VPS использует telegram-bot.access.txt (другой токен).
+
+BOT_TOKEN=123456789:AAH_your_test_bot_token_from_BotFather
+ALLOWED_USER_IDS=123456789
+BOT_USERNAME=
+BOT_LINK=

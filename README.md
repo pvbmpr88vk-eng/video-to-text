@@ -179,24 +179,45 @@ python -m app process /path/to/video.mp4 --language ru --summarize
 
 Локальный бот принимает видео/аудио (до **20 MB**), делает **транскрипт** (.txt) и предлагает кнопку **«Сделать тезисы»** — саммари через Ollama по запросу.
 
-### Настройка
+### Два бота: тест (локально) и прод (VPS)
 
-1. Создайте бота в [@BotFather](https://t.me/BotFather), узнайте свой `user_id` (например [@userinfobot](https://t.me/userinfobot)).
-2. Скопируйте шаблон и заполните токен и id (файл в `.gitignore`):
+| Окружение | Файл credentials | Где запускать |
+|-----------|------------------|---------------|
+| **Прод** | `telegram-bot.access.txt` | Docker на VPS (`62.217.176.132`) — деплой **только по явному запросу** |
+| **Тест** | `telegram-bot.access.test.txt` | Mac, `./scripts/start-local-test.sh` — **основное окружение для разработки** |
+
+Не запускайте **прод**-токен локально и **тест**-токен на сервере — иначе Telegram `409 Conflict` (один токен = один polling).
 
 ```bash
-cp telegram-bot.access.example.txt telegram-bot.access.txt
+# Тестовый бот (локально)
+cp telegram-bot.access.test.example.txt telegram-bot.access.test.txt
+# вписать BOT_TOKEN от @BotFather и те же ALLOWED_USER_IDS, что у прод
 ```
+
+Переменная `TELEGRAM_ACCESS_FILE` указывает, какой файл читать. Локальный тест использует Redis DB **1** (`REDIS_URL=redis://127.0.0.1:6379/1`), прод на VPS — свой Redis в Docker.
+
+### Настройка
+
+1. Создайте ботов в [@BotFather](https://t.me/BotFather), узнайте `user_id` ([@userinfobot](https://t.me/userinfobot)).
+2. Прод: `cp telegram-bot.access.example.txt telegram-bot.access.txt` (на VPS).
+3. Тест: `cp telegram-bot.access.test.example.txt telegram-bot.access.test.txt` (только Mac).
 
 В `ALLOWED_USER_IDS` — **список** числовых user id (через запятую); писать боту могут **только они**. Пустой список — бот не запустится.
 
 Переменные `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_IDS`, `TELEGRAM_ACCESS_FILE` в окружении перекрывают файл.
 
-3. Нужна **Redis** и воркеры (этап 5); для кнопки «Сделать тезисы» — запущенная **Ollama** с моделью из этапа 3.
+4. Нужна **Redis** и воркеры (этап 5); для кнопки «Сделать тезисы» — **Ollama** (локально на Mac или на хосте VPS).
 
 ### Запуск
 
-**Локально (3 процесса):**
+**Локально — тестовый бот (рекомендуется):**
+
+```bash
+./scripts/start-local-test.sh
+# затем в 3 терминалах — команды из вывода скрипта (TELEGRAM_ACCESS_FILE=...test.txt)
+```
+
+**Локально (3 процесса, вручную):**
 
 ```bash
 # 1. Redis (обязательно с этапа 5)

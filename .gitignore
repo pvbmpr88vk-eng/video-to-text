@@ -6,7 +6,9 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.local
 telegram-bot.access.txt
+telegram-bot.access.test.txt
 *бота*.rtf
 
 # Media & outputs
@@ -25,6 +27,9 @@ transcripts/
 
 # Local ffmpeg binaries (optional, no brew)
 .local/
+
+# SSH (private key must not be committed)
+ssh-keys/id_ed25519
 
 # OS & IDE
 .DS_Store

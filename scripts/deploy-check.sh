@@ -27,6 +27,17 @@ echo "=== worker-transcript health ==="
 "${COMPOSE[@]}" exec -T worker-transcript python -m app health --skip-ollama \
   || fail "worker-transcript health"
 
+echo "=== whisper cache writable ==="
+"${COMPOSE[@]}" exec -T worker-transcript python -c "
+from pathlib import Path
+p = Path('/home/appuser/.cache/huggingface/hub')
+p.mkdir(parents=True, exist_ok=True)
+f = p / '.write_test'
+f.write_text('ok')
+f.unlink()
+print('whisper cache ok')
+" || fail "whisper_cache not writable — run ./scripts/fix-docker-volumes.sh"
+
 echo "=== worker-summary health (ollama) ==="
 "${COMPOSE[@]}" exec -T worker-summary python -m app health || fail "worker-summary / ollama"
 

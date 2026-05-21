@@ -26,6 +26,19 @@ def _ollama_reachable() -> bool:
 
 
 async def _post_init(application) -> None:
+    try:
+        me = await application.bot.get_me()
+        access = os.environ.get("TELEGRAM_ACCESS_FILE", "telegram-bot.access.txt")
+        logger.info(
+            "Telegram bot ready: @%s (id=%s), credentials=%s, APP_ENV=%s",
+            me.username,
+            me.id,
+            access,
+            os.environ.get("APP_ENV", "default"),
+        )
+    except Exception:
+        logger.debug("get_me failed at startup", exc_info=True)
+
     if JOB_QUEUE_ENABLED:
         store: JobStore = application.bot_data["job_store"]
         stale = store.fail_stale_waiting_jobs(max_age_sec=3600)
@@ -66,8 +79,8 @@ def run_bot(*, verbose: bool = False) -> None:
     except CredentialsError as exc:
         print(
             f"Error: {exc}\n"
-            "Создайте telegram-bot.access.txt из telegram-bot.access.example.txt "
-            "или задайте TELEGRAM_BOT_TOKEN в окружении.",
+            "Создайте telegram-bot.access.txt (прод) или telegram-bot.access.test.txt (локальный тест) "
+            "или задайте TELEGRAM_BOT_TOKEN + TELEGRAM_ACCESS_FILE.",
             file=sys.stderr,
         )
         raise SystemExit(7) from exc

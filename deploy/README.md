@@ -8,8 +8,12 @@
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
-./scripts/pull-summary-model.sh
-# or: ollama pull qwen2.5:3b-instruct
+# Allow Docker containers to reach Ollama on the host:
+mkdir -p /etc/systemd/system/ollama.service.d
+printf '[Service]\nEnvironment=OLLAMA_HOST=0.0.0.0:11434\n' \
+  > /etc/systemd/system/ollama.service.d/override.conf
+systemctl daemon-reload && systemctl restart ollama
+ollama pull qwen2.5:3b-instruct
 ```
 
 ## 2. Configure
@@ -24,8 +28,27 @@ cp telegram-bot.access.example.txt telegram-bot.access.txt  # or TELEGRAM_BOT_TO
 ## 3. Start
 
 ```bash
+mkdir -p output/jobs output/telegram/inbox
+sudo chown -R 1000:1000 output   # обязательно: контейнеры пишут как uid 1000
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ./scripts/deploy-check.sh
+```
+
+Если ссылки не качаются — проверьте права: `ls -la output` (должен владелец **1000:1000**), иначе бот не создаст `output/jobs/...`.
+
+После первого `docker compose up` выполните (или `./scripts/fix-docker-volumes.sh`):
+
+```bash
+sudo chown -R 1000:1000 output
+docker compose run --rm --user root worker-transcript sh -c \
+  'mkdir -p /home/appuser/.cache/huggingface/hub && chown -R 1000:1000 /home/appuser/.cache'
+```
+
+Если бот пишет **«Модель распознавания не загружена»** — в логах worker-transcript часто `Permission denied` на `/home/appuser/.cache/huggingface/hub`: том `whisper_cache` создан от root. Команды выше + прогрев модели:
+
+```bash
+docker compose exec -T worker-transcript python -c \
+  "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 ```
 
 ## 4. Maintenance
