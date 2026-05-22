@@ -28,6 +28,8 @@ echo "=== Rsync project (private repo — no git clone on server) ==="
 RSYNC=(rsync -avz --delete
   --exclude '.venv' --exclude 'output' --exclude '.git' --exclude '__pycache__'
   --exclude '.env' --exclude '.env.local'
+  --exclude 'telegram-bot.access.txt'
+  --exclude 'telegram-bot.access.txt.*'
   --exclude 'telegram-bot.access.test.txt'
   --exclude 'ssh-keys/id_ed25519' --exclude '.clt-install')
 "${RSYNC[@]}" -e "ssh -i \"${KEY}\" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=30" \
