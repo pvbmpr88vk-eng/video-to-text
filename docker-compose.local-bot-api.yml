@@ -72,9 +72,9 @@ services:
     environment:
       TELEGRAM_BOT_API_BASE_URL: http://telegram-bot-api:8081
       TELEGRAM_BOT_FILE_SIZE_LIMIT: ${TELEGRAM_BOT_FILE_SIZE_LIMIT:-524288000}
-    # Local API stores files here; bot copies by path (see app/telegram/download.py).
+    # Local API cache; bot copies then unlinks source (TZ-09 §9.4 A) — needs rw.
     volumes:
-      - telegram_bot_api_data:/var/lib/telegram-bot-api:ro
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
     group_add:
       - "101"
     depends_on:

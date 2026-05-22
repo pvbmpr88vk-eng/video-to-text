@@ -5,19 +5,35 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.prod.yml)
-if [[ -f docker-compose.dev.yml ]] && [[ "${DEPLOY_PROFILE:-}" == "dev" ]]; then
-  COMPOSE+=(-f docker-compose.dev.yml)
+if [[ -f "$ROOT/.env" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$ROOT/.env"
+  set +a
 fi
+# shellcheck source=scripts/lib/compose-args.sh
+source "$ROOT/scripts/lib/compose-args.sh"
+init_compose_args "$ROOT"
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILE_ARGS[@]}")
 
 OUTPUT="${1:-$ROOT/output}"
 UID_APP=1000
 
 mkdir -p "$OUTPUT/jobs" "$OUTPUT/telegram/inbox"
-chown -R "${UID_APP}:${UID_APP}" "$OUTPUT"
-chmod -R u+rwX "$OUTPUT"
-echo "OK: $OUTPUT -> uid ${UID_APP}"
+# Host chown may fail on macOS for files owned by container uid; fix via container below.
+if chown -R "${UID_APP}:${UID_APP}" "$OUTPUT" 2>/dev/null; then
+  chmod -R u+rwX "$OUTPUT"
+  echo "OK: $OUTPUT -> uid ${UID_APP} (host chown)"
+else
+  echo "WARN: host chown skipped (use container fix for output/)"
+fi
 
 "${COMPOSE[@]}" run --rm --user root worker-transcript sh -c \
   'mkdir -p /home/appuser/.cache/huggingface/hub && chown -R 1000:1000 /home/appuser/.cache'
 echo "OK: whisper_cache volume -> uid ${UID_APP}"
+
+if [[ -d "$OUTPUT" ]]; then
+  "${COMPOSE[@]}" run --rm --user root -v "${OUTPUT}:/app/output" worker-transcript sh -c \
+    'chown -R 1000:1000 /app/output && chmod -R u+rwX /app/output' \
+    && echo "OK: output/ -> uid ${UID_APP} (via container)"
+fi

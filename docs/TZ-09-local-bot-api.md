@@ -275,5 +275,6 @@ du -sh output/jobs                  # inbox
 | Код `bot.py` / `config.py` / `health.py` | готово |
 | `tests/test_local_bot_api_config.py` | готово |
 | `deploy-remote.sh` + `ENABLE_LOCAL_BOT_API=1` | готово |
-| Деплой на VPS | **по запросу** (см. правило deploy-and-environments) |
-| Удаление кэша сразу после copy (§9.4) | **не сделано** (рекомендация) |
+| Деплой на VPS | **готово** (`ENABLE_LOCAL_BOT_API=1`) |
+| Удаление кэша сразу после copy (§9.4 A) | **готово** (`download.py`, том bot `:rw`) |
+| `tests/test_telegram_download.py` | готово |

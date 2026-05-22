@@ -13,9 +13,8 @@ fi
 
 # shellcheck source=scripts/lib/compose-args.sh
 source "$ROOT/scripts/lib/compose-args.sh"
-read -r -a COMPOSE_FILES <<<"$(compose_files "$ROOT")"
-read -r -a PROFILE_ARGS <<<"$(compose_profile_args)"
-COMPOSE=(docker compose "${COMPOSE_FILES[@]}" "${PROFILE_ARGS[@]}")
+init_compose_args "$ROOT"
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILE_ARGS[@]}")
 
 fail() {
   echo "FAIL: $*" >&2

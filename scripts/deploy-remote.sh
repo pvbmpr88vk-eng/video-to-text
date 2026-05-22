@@ -71,15 +71,14 @@ set -euo pipefail
 cd ${APP_DIR}
 WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API}
 source scripts/lib/compose-args.sh
-read -r -a COMPOSE_FILES <<<"\$(compose_files "\${PWD}")"
-read -r -a PROFILE_ARGS <<<"\$(compose_profile_args)"
-docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" up -d --build
+init_compose_args "\${PWD}"
+docker compose "\${COMPOSE_FILES[@]}" "\${COMPOSE_PROFILE_ARGS[@]}" up -d --build
 ./scripts/fix-docker-volumes.sh
 echo "=== Warm up Whisper model (small) ==="
-docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" exec -T worker-transcript python -c \
+docker compose "\${COMPOSE_FILES[@]}" "\${COMPOSE_PROFILE_ARGS[@]}" exec -T worker-transcript python -c \
   "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8'); print('whisper ok')"
-docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" exec -T redis redis-cli DEL bot:telegram:polling 2>/dev/null || true
-docker compose "\${COMPOSE_FILES[@]}" "\${PROFILE_ARGS[@]}" restart bot
+docker compose "\${COMPOSE_FILES[@]}" "\${COMPOSE_PROFILE_ARGS[@]}" exec -T redis redis-cli DEL bot:telegram:polling 2>/dev/null || true
+docker compose "\${COMPOSE_FILES[@]}" "\${COMPOSE_PROFILE_ARGS[@]}" restart bot
 sleep 5
 WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API} ./scripts/deploy-check.sh
 REMOTE

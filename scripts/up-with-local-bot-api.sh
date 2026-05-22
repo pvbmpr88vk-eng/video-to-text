@@ -21,11 +21,10 @@ export TELEGRAM_BOT_API_CACHE_TTL_HOURS="${TELEGRAM_BOT_API_CACHE_TTL_HOURS:-6}"
 
 # shellcheck source=scripts/lib/compose-args.sh
 source "$ROOT/scripts/lib/compose-args.sh"
-read -r -a COMPOSE_FILES <<<"$(compose_files "$ROOT")"
-read -r -a PROFILE_ARGS <<<"$(compose_profile_args)"
+init_compose_args "$ROOT"
 
 echo "=== compose up (Local Bot API) ==="
-docker compose "${COMPOSE_FILES[@]}" "${PROFILE_ARGS[@]}" up -d --build
+docker compose "${COMPOSE_FILES[@]}" "${COMPOSE_PROFILE_ARGS[@]}" up -d --build
 
 ./scripts/fix-docker-volumes.sh
 sleep 8
