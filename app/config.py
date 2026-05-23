@@ -111,3 +111,27 @@ RQ_QUEUE_SUMMARY = "summary"
 
 LOG_FORMAT = os.environ.get("LOG_FORMAT", "text").strip().lower()
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+
+# GPU Sharing (remote GPU jobs) — key only in .env, never commit
+GPU_SHARING_URL = os.environ.get("GPU_SHARING_URL", "http://81.163.244.151").strip().rstrip("/")
+GPU_SHARING_API_KEY = os.environ.get("GPU_SHARING_API_KEY", "").strip()
+GPU_SHARING_ENABLED = os.environ.get("GPU_SHARING_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# API v3: ONNX invoke runtime (see tenant handoff).
+GPU_SHARING_RUNTIME = os.environ.get("GPU_SHARING_RUNTIME", "onnx_cuda").strip()
+# Public HTTPS/HTTP URL to ONNX model for smoke test (no redirects; VPS staging OK).
+GPU_SHARING_TEST_MODEL_URL = os.environ.get("GPU_SHARING_TEST_MODEL_URL", "").strip()
+# Legacy v1/v2 Docker jobs STT — disabled by default (API v3 does not support image/command).
+GPU_SHARING_TRANSCRIPT = os.environ.get("GPU_SHARING_TRANSCRIPT", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+GPU_SHARING_STT_IMAGE = os.environ.get("GPU_SHARING_STT_IMAGE", "python:3.11-slim").strip()
+GPU_SHARING_STT_MODEL = os.environ.get("GPU_SHARING_STT_MODEL", "tiny").strip()
+GPU_SHARING_STT_TIMEOUT_SEC = int(os.environ.get("GPU_SHARING_STT_TIMEOUT_SEC", "1800"))
+GPU_SHARING_STT_PUBLISH_HOST = os.environ.get("GPU_SHARING_STT_PUBLISH_HOST", "").strip()
+GPU_SHARING_STT_PUBLISH_PORT = int(os.environ.get("GPU_SHARING_STT_PUBLISH_PORT", "18888"))

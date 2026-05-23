@@ -24,6 +24,12 @@ init_compose_args() {
   fi
 }
 
+# Site stack is separate: docker compose -f docker-compose.site.yml
+init_site_compose_args() {
+  local root="${1:-.}"
+  SITE_COMPOSE_FILES=(-f "${root}/docker-compose.site.yml")
+}
+
 # Deprecated: do not use with <<< — breaks on spaces in paths.
 compose_files() {
   init_compose_args "${1:-.}"

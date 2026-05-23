@@ -68,6 +68,10 @@ services:
         limits:
           memory: 64M
 
+  worker-transcript:
+    volumes:
+      - ./ssh-keys:/app/ssh-keys:ro
+
   bot:
     environment:
       TELEGRAM_BOT_API_BASE_URL: http://telegram-bot-api:8081

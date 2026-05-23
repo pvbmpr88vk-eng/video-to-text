@@ -78,3 +78,17 @@ docker compose exec bot python -m app jobs cleanup
 ## RAM note
 
 Do **not** enable `with-ollama` profile on 4 GB — run Ollama on the host only. One STT job + host Ollama must fit in 4 GB total.
+
+## 6. Сайт pible.ru
+
+Лендинг: **https://pible.ru** (контейнеры `site` + `site-caddy`, отдельно от бота).
+
+**Полная инструкция:** [docs/deploy-site.md](../docs/deploy-site.md) — правка HTML, деплой с Mac, DNS reg.ru, HTTPS, troubleshooting.
+
+Быстрое обновление с Mac:
+
+```bash
+export DEPLOY_HOST=62.217.176.132 DEPLOY_USER=root
+export SITE_DOMAIN='pible.ru, www.pible.ru' SITE_EMAIL=admin@pible.ru
+./scripts/deploy-site-remote.sh
+```

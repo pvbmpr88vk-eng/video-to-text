@@ -1,0 +1,24 @@
+# SITE_DOMAIN, SITE_PUBLIC_IP from .env (docker-compose.site.yml).
+# Local preview: SITE_DOMAIN=:80
+
+# HTTPS only for domain names (Let's Encrypt).
+{$SITE_DOMAIN} {
+	reverse_proxy site:80
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
+
+# By IP there is no public TLS cert — redirect to the domain (do not open https://IP in browser).
+http://{$SITE_PUBLIC_IP:62.217.176.132} {
+	redir https://pible.ru{uri} permanent
+}
+
+https://{$SITE_PUBLIC_IP:62.217.176.132} {
+	tls internal
+	redir https://pible.ru{uri} permanent
+}

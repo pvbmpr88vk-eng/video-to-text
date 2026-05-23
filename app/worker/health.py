@@ -7,7 +7,13 @@ import sys
 import httpx
 
 from app.audio.ffmpeg import require_ffmpeg_tools
-from app.config import OLLAMA_HOST, REDIS_URL, TELEGRAM_BOT_API_BASE_URL
+from app.config import (
+    GPU_SHARING_API_KEY,
+    GPU_SHARING_ENABLED,
+    OLLAMA_HOST,
+    REDIS_URL,
+    TELEGRAM_BOT_API_BASE_URL,
+)
 from app.queue.rq_connection import get_redis
 
 logger = logging.getLogger(__name__)
@@ -67,6 +73,26 @@ def run_health_check(*, check_ollama: bool = True) -> int:
                 ok = False
         except Exception as exc:
             logger.error("Local Bot API unreachable at %s: %s", ping_url, exc)
+            ok = False
+
+    if GPU_SHARING_API_KEY and GPU_SHARING_ENABLED:
+        try:
+            from app.gpu_sharing.client import client_from_config
+
+            client = client_from_config()
+            if client is None:
+                raise RuntimeError("GPU Sharing client not configured")
+            health = client.health()
+            if health.get("status") != "ok":
+                logger.error("GPU Sharing health unexpected: %s", health)
+                ok = False
+            elif not client.has_online_node():
+                logger.error("GPU Sharing: no online GPU nodes")
+                ok = False
+            else:
+                logger.info("GPU Sharing OK (%s, online node)", client.base_url)
+        except Exception as exc:
+            logger.error("GPU Sharing check failed: %s", exc)
             ok = False
 
     return 0 if ok else 1

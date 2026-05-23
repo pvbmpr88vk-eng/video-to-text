@@ -7,6 +7,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source .env
+  set +a
+fi
+
 : "${DEPLOY_HOST:?Set DEPLOY_HOST (server IP or hostname)}"
 : "${DEPLOY_USER:?Set DEPLOY_USER (e.g. root or ubuntu)}"
 
@@ -84,6 +91,17 @@ docker compose "\${COMPOSE_FILES[@]}" "\${COMPOSE_PROFILE_ARGS[@]}" restart bot
 sleep 5
 WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API} ./scripts/deploy-check.sh
 REMOTE
+
+if [[ -n "${SITE_DOMAIN:-}" ]]; then
+  echo "=== Site stack (SITE_DOMAIN=${SITE_DOMAIN}) ==="
+  "${SSH[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<REMOTE
+set -euo pipefail
+cd ${APP_DIR}
+docker compose -f docker-compose.site.yml up -d --build
+docker compose -f docker-compose.site.yml ps
+REMOTE
+  echo "Site: https://${SITE_DOMAIN}/ (after DNS A-record → ${DEPLOY_HOST})"
+fi
 
 echo "NOTE: stop any other bot instance (local Mac) to avoid Telegram 409 Conflict."
 

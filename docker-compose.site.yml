@@ -1,0 +1,64 @@
+name: videototext-site
+
+# Public landing page + HTTPS (Caddy). Separate from bot/workers stack.
+#
+#   cp deploy/env/site.env.example .env   # add SITE_DOMAIN, SITE_EMAIL
+#   docker compose -f docker-compose.site.yml up -d --build
+#
+# DNS: A @ and www → this host's public IP (pible.ru → see docs/deploy-site.md). Ports 80/443 open.
+
+services:
+  site:
+    build: ./website
+    restart: unless-stopped
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+
+  site-caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      site:
+        condition: service_healthy
+    ports:
+      - "${SITE_HTTP_PORT:-80}:80"
+      - "${SITE_HTTPS_PORT:-443}:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?Set SITE_DOMAIN in .env (e.g. videototext.example.com)}
+      SITE_PUBLIC_IP: ${SITE_PUBLIC_IP:-62.217.176.132}
+      SITE_EMAIL: ${SITE_EMAIL:-}
+    # Pass email into Caddy global options when provided
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$SITE_EMAIL" ]; then
+          printf '{\n\temail %s\n}\n\n' "$$SITE_EMAIL" > /tmp/Caddyfile.head
+          cat /etc/caddy/Caddyfile >> /tmp/Caddyfile.head
+          exec caddy run --config /tmp/Caddyfile.head
+        else
+          exec caddy run --config /etc/caddy/Caddyfile
+        fi
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  caddy_data:
+  caddy_config:

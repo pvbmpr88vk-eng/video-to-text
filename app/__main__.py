@@ -268,6 +268,42 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not check Ollama (for transcript-only workers)",
     )
 
+    gpu_check = subparsers.add_parser(
+        "gpu-sharing-check",
+        help="Smoke test GPU Sharing API v3 (health, nodes, ONNX invoke)",
+    )
+    gpu_check.add_argument(
+        "--skip-invoke",
+        action="store_true",
+        help="Only check /health, nodes, runtimes (no ONNX invoke)",
+    )
+    gpu_check.add_argument(
+        "--model-url",
+        default=None,
+        help="ONNX model URL for invoke test (default: GPU_SHARING_TEST_MODEL_URL)",
+    )
+
+    gpu_stt = subparsers.add_parser(
+        "gpu-sharing-transcribe",
+        help="[deprecated v1/v2] Docker jobs STT — use ONNX v3 instead (docs/gpu-sharing.md)",
+    )
+    gpu_stt.add_argument(
+        "--audio-url",
+        default=None,
+        help="Public HTTP(S) URL to WAV/MP3 for remote worker",
+    )
+    gpu_stt.add_argument(
+        "--audio-path",
+        type=Path,
+        default=None,
+        help="Local file — upload to GPU_SHARING_STT_PUBLISH_HOST then transcribe",
+    )
+    gpu_stt.add_argument(
+        "--model",
+        default=None,
+        help="Whisper model on remote worker (default: GPU_SHARING_STT_MODEL)",
+    )
+
     queue = subparsers.add_parser("queue", help="Redis/RQ queue diagnostics")
     queue_sub = queue.add_subparsers(dest="queue_command", required=True)
     queue_sub.add_parser("status", help="Show workers and queue depth")
@@ -475,6 +511,75 @@ def main(argv: list[str] | None = None) -> int:
         from app.worker.health import run_health_check
 
         return run_health_check(check_ollama=not args.skip_ollama)
+    if args.command == "gpu-sharing-check":
+        from app.config import GPU_SHARING_RUNTIME, GPU_SHARING_TEST_MODEL_URL
+        from app.gpu_sharing.client import GPUSharingError, client_from_config
+
+        client = client_from_config()
+        if client is None:
+            print("Error: set GPU_SHARING_API_KEY in .env", file=sys.stderr)
+            return EXIT_INVALID_ARGS
+        try:
+            health = client.health()
+            print(f"health: {health}")
+            nodes = client.list_nodes()
+            online = sum(1 for n in nodes if n.get("status") == "online")
+            print(f"nodes: {len(nodes)} total, {online} online")
+            runtimes = client.list_runtimes()
+            print(f"runtimes: {[r.get('runtime_id') for r in runtimes]}")
+            if online == 0:
+                print("Error: no online GPU node", file=sys.stderr)
+                return EXIT_INVALID_ARGS
+            if args.skip_invoke:
+                return EXIT_SUCCESS
+            model_url = args.model_url or GPU_SHARING_TEST_MODEL_URL
+            if not model_url:
+                print(
+                    "Error: set GPU_SHARING_TEST_MODEL_URL or pass --model-url "
+                    "(direct URL, no redirects)",
+                    file=sys.stderr,
+                )
+                return EXIT_INVALID_ARGS
+            out = client.run_invoke(
+                runtime=GPU_SHARING_RUNTIME,
+                model_url=model_url,
+                timeout_sec=600,
+            )
+            inv = out["invoke"]
+            device = client.invoke_device(inv)
+            print(f"invoke: {inv.get('status')} device={device}")
+            if device != "cuda":
+                print("Warning: expected device=cuda", file=sys.stderr)
+            return EXIT_SUCCESS if inv.get("status") == "done" else EXIT_STT
+        except GPUSharingError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return EXIT_STT
+    if args.command == "gpu-sharing-transcribe":
+        from app.config import GPU_SHARING_STT_MODEL
+        from app.gpu_sharing.client import GPUSharingError
+        from app.gpu_sharing.remote_stt import (
+            run_remote_transcribe,
+            transcribe_local_file_via_gpu,
+        )
+
+        model = args.model or GPU_SHARING_STT_MODEL
+        try:
+            if args.audio_url:
+                out = run_remote_transcribe(args.audio_url, model=model)
+            elif args.audio_path:
+                out = transcribe_local_file_via_gpu(args.audio_path, model=model)
+            else:
+                print("Error: pass --audio-url or --audio-path", file=sys.stderr)
+                return EXIT_INVALID_ARGS
+            print("job_id:", out.get("job_id"))
+            print("device:", out.get("device"))
+            print("language:", out.get("language"))
+            print("--- transcript ---")
+            print(out.get("text", ""))
+            return EXIT_SUCCESS
+        except GPUSharingError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return EXIT_STT
     if args.command == "queue":
         if args.queue_command == "status":
             from app.queue.diagnostics import format_queue_status

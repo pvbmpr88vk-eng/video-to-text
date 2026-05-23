@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pible — видео в текст и саммари в Telegram</title>
+  <meta name="description" content="Отправьте видео, аудио или ссылку — получите текст и краткое саммари в Telegram." />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="header">
+    <a class="logo" href="/">Pible</a>
+    <a class="btn btn--ghost" href="#how">Как это работает</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="hero__badge">Telegram-бот</p>
+      <h1>Видео и аудио —<br />в текст и саммари</h1>
+      <p class="hero__lead">
+        Загрузите файл или ссылку (YouTube и др.) — бот извлечёт речь,
+        распознает её и при необходимости сделает краткое резюме.
+      </p>
+      <div class="hero__actions">
+        <a class="btn btn--primary" href="#start">Начать в Telegram</a>
+        <a class="btn btn--outline" href="https://github.com/pvbmpr88vk-eng/video-to-text" rel="noopener">Исходный код</a>
+      </div>
+    </section>
+
+    <section class="features" id="how">
+      <h2>Возможности</h2>
+      <ul class="grid">
+        <li class="card">
+          <h3>Файлы</h3>
+          <p>Видео и аудио из чата — в том числе крупные файлы через Local Bot API.</p>
+        </li>
+        <li class="card">
+          <h3>Ссылки</h3>
+          <p>Скачивание с YouTube и других площадок, затем распознавание речи.</p>
+        </li>
+        <li class="card">
+          <h3>Саммари</h3>
+          <p>Краткое резюме транскрипта с помощью локальной LLM (Ollama).</p>
+        </li>
+        <li class="card">
+          <h3>Приватность</h3>
+          <p>Обработка на вашем сервере: без сторонних облачных STT по умолчанию.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="start" id="start">
+      <h2>Как подключиться</h2>
+      <ol class="steps">
+        <li>Откройте бота в Telegram (ссылку выдаёт администратор сервиса).</li>
+        <li>Отправьте голосовое, видео, документ или ссылку на ролик.</li>
+        <li>Дождитесь статуса в чате — получите <code>.txt</code> и при необходимости саммари.</li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>pible.ru · <a href="https://github.com/pvbmpr88vk-eng/video-to-text">GitHub</a></p>
+  </footer>
+</body>
+</html>

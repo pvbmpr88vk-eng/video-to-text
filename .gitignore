@@ -7,6 +7,8 @@ __pycache__/
 venv/
 .env
 .env.local
+*handoff*.md
+tenant-handoff.md
 telegram-bot.access.txt
 telegram-bot.access.test.txt
 *бота*.rtf

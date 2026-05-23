@@ -12,6 +12,7 @@ from app.audio.exceptions import FFmpegError, FFmpegNotFoundError, NoAudioStream
 from app.audio.extractor import extract_audio
 from app.config import (
     DEFAULT_CHUNK_MINUTES,
+    GPU_SHARING_TRANSCRIPT,
     MAX_CONCURRENT_SUMMARIES,
     MAX_STT_WORKERS_PER_JOB,
     OLLAMA_HOST,
@@ -91,19 +92,25 @@ def run_transcript_job(job_id: str) -> None:
             logger.info("Transcript job %s cancelled before STT", job_id)
             return
 
-        workers = resolve_workers(None, default=MAX_STT_WORKERS_PER_JOB)
-        tr = transcribe_audio(
-            wav,
-            output_dir=out_dir,
-            model_size=WHISPER_MODEL_DEFAULT,
-            language=job.language,
-            with_segments=True,
-            parallel=workers > 1,
-            chunk_minutes=DEFAULT_CHUNK_MINUTES,
-            workers=workers,
-            keep_chunks=False,
-            progress_callback=lambda pct, label: progress.report(pct, label),
-        )
+        if GPU_SHARING_TRANSCRIPT:
+            raise TranscriptionError(
+                "GPU_SHARING_TRANSCRIPT: Docker jobs API (v1/v2) отключён. "
+                "v3 — ONNX на VPS + /v1/gpu/invoke. См. docs/gpu-sharing.md"
+            )
+        else:
+            workers = resolve_workers(None, default=MAX_STT_WORKERS_PER_JOB)
+            tr = transcribe_audio(
+                wav,
+                output_dir=out_dir,
+                model_size=WHISPER_MODEL_DEFAULT,
+                language=job.language,
+                with_segments=True,
+                parallel=workers > 1,
+                chunk_minutes=DEFAULT_CHUNK_MINUTES,
+                workers=workers,
+                keep_chunks=False,
+                progress_callback=lambda pct, label: progress.report(pct, label),
+            )
         progress.report(100.0, "Готово", force=True)
 
         if store.is_cancelled(job_id):
