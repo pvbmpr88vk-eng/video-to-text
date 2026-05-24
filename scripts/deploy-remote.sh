@@ -97,6 +97,7 @@ if [[ -n "${SITE_DOMAIN:-}" ]]; then
   "${SSH[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<REMOTE
 set -euo pipefail
 cd ${APP_DIR}
+set -a && source .env && set +a
 docker compose -f docker-compose.site.yml up -d --build
 docker compose -f docker-compose.site.yml ps
 REMOTE
