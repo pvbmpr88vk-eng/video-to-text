@@ -113,7 +113,7 @@ LOG_FORMAT = os.environ.get("LOG_FORMAT", "text").strip().lower()
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
 
 # GPU Sharing (remote GPU jobs) — key only in .env, never commit
-GPU_SHARING_URL = os.environ.get("GPU_SHARING_URL", "http://81.163.244.151").strip().rstrip("/")
+GPU_SHARING_URL = os.environ.get("GPU_SHARING_URL", "http://85.198.66.114:8082").strip().rstrip("/")
 GPU_SHARING_API_KEY = os.environ.get("GPU_SHARING_API_KEY", "").strip()
 GPU_SHARING_ENABLED = os.environ.get("GPU_SHARING_ENABLED", "true").lower() in (
     "1",
@@ -135,3 +135,11 @@ GPU_SHARING_STT_MODEL = os.environ.get("GPU_SHARING_STT_MODEL", "tiny").strip()
 GPU_SHARING_STT_TIMEOUT_SEC = int(os.environ.get("GPU_SHARING_STT_TIMEOUT_SEC", "1800"))
 GPU_SHARING_STT_PUBLISH_HOST = os.environ.get("GPU_SHARING_STT_PUBLISH_HOST", "").strip()
 GPU_SHARING_STT_PUBLISH_PORT = int(os.environ.get("GPU_SHARING_STT_PUBLISH_PORT", "18888"))
+# Local dir served by host http.server (prod worker volume); empty = SSH publish (dev/Mac).
+GPU_SHARING_STT_STAGING_DIR = os.environ.get("GPU_SHARING_STT_STAGING_DIR", "").strip()
+# When GPU path fails (v3 jobs off / ONNX not ready), use faster-whisper on VPS.
+GPU_SHARING_STT_FALLBACK_CPU = os.environ.get("GPU_SHARING_STT_FALLBACK_CPU", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)

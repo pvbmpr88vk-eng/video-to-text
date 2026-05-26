@@ -97,16 +97,41 @@ def run_remote_transcribe(
 def publish_audio_for_gpu(
     local_path: Path,
     *,
-    deploy_host: str,
+    deploy_host: str | None = None,
     deploy_user: str = "root",
-    ssh_key: Path,
+    ssh_key: Path | None = None,
     remote_dir: str = "/tmp/vtt-gpu-audio",
-    http_port: int = 18888,
+    http_port: int | None = None,
 ) -> str:
-    """Copy audio to VPS and return HTTP URL reachable by GPU worker."""
+    """Copy audio to HTTP staging and return URL reachable by the GPU worker."""
+    from app.config import (
+        GPU_SHARING_STT_PUBLISH_HOST,
+        GPU_SHARING_STT_PUBLISH_PORT,
+        GPU_SHARING_STT_STAGING_DIR,
+    )
+    from app.gpu_sharing.staging import publish_file_to_staging
+
     local_path = local_path.resolve()
     if not local_path.is_file():
         raise FileNotFoundError(local_path)
+
+    host = (deploy_host or GPU_SHARING_STT_PUBLISH_HOST).strip()
+    if not host:
+        raise GPUSharingError("Set GPU_SHARING_STT_PUBLISH_HOST (VPS IP for audio HTTP staging)")
+    port = http_port if http_port is not None else GPU_SHARING_STT_PUBLISH_PORT
+
+    if GPU_SHARING_STT_STAGING_DIR:
+        return publish_file_to_staging(
+            local_path,
+            staging_dir=Path(GPU_SHARING_STT_STAGING_DIR),
+            publish_host=host,
+            http_port=port,
+        )
+
+    if ssh_key is None:
+        raise GPUSharingError(
+            "GPU_SHARING_STT_STAGING_DIR not set and no SSH key for remote publish"
+        )
 
     name = f"{uuid.uuid4().hex[:12]}{local_path.suffix or '.wav'}"
     remote_path = f"{remote_dir}/{name}"
@@ -153,22 +178,23 @@ def transcribe_local_file_via_gpu(
         GPU_SHARING_STT_PUBLISH_PORT,
     )
 
+    from app.config import GPU_SHARING_STT_STAGING_DIR
+
     host = publish_host or GPU_SHARING_STT_PUBLISH_HOST
-    if not host:
-        raise GPUSharingError("Set GPU_SHARING_STT_PUBLISH_HOST (VPS IP for audio HTTP staging)")
     key = ssh_key
-    if key is None:
-        for candidate in (
-            Path("/app/ssh-keys/id_ed25519"),
-            Path(__file__).resolve().parents[2] / "ssh-keys" / "id_ed25519",
-        ):
-            if candidate.is_file():
-                key = candidate
-                break
-        else:
-            key = Path(__file__).resolve().parents[2] / "ssh-keys" / "id_ed25519"
-    if not key.is_file():
-        raise GPUSharingError(f"SSH key not found: {key}")
+    if not GPU_SHARING_STT_STAGING_DIR:
+        if key is None:
+            for candidate in (
+                Path("/app/ssh-keys/id_ed25519"),
+                Path(__file__).resolve().parents[2] / "ssh-keys" / "id_ed25519",
+            ):
+                if candidate.is_file():
+                    key = candidate
+                    break
+            else:
+                key = Path(__file__).resolve().parents[2] / "ssh-keys" / "id_ed25519"
+        if not key.is_file():
+            raise GPUSharingError(f"SSH key not found: {key}")
 
     url = publish_audio_for_gpu(
         audio_path,

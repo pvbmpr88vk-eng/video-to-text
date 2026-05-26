@@ -7,21 +7,25 @@
   <meta name="description" content="Отправьте видео, аудио или ссылку — получите текст и краткое саммари в Telegram." />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/styles.css" />
+  <script src="/site.js" defer></script>
 </head>
 <body>
   <header class="header">
     <a class="logo" href="/">Pible</a>
+    <span id="gpu-status" class="gpu-status gpu-status--loading" aria-live="polite">GPU…</span>
     <a class="btn btn--ghost" href="#how">Как это работает</a>
   </header>
 
   <main>
     <section class="hero">
-      <p class="hero__badge">Telegram-бот</p>
+      <p class="hero__badge">Telegram-бот · удалённый GPU</p>
       <h1>Видео и аудио —<br />в текст и саммари</h1>
       <p class="hero__lead">
         Загрузите файл или ссылку (YouTube и др.) — бот извлечёт речь,
         распознает её и при необходимости сделает краткое резюме.
+        Тяжёлые ONNX-задачи выполняются на <strong>GPU Sharing</strong> (CUDA).
       </p>
+      <p id="gpu-detail" class="hero__gpu-detail"></p>
       <div class="hero__actions">
         <a class="btn btn--primary" href="#start">Начать в Telegram</a>
         <a class="btn btn--outline" href="https://github.com/pvbmpr88vk-eng/video-to-text" rel="noopener">Исходный код</a>
@@ -44,8 +48,8 @@
           <p>Краткое резюме транскрипта с помощью локальной LLM (Ollama).</p>
         </li>
         <li class="card">
-          <h3>Приватность</h3>
-          <p>Обработка на вашем сервере: без сторонних облачных STT по умолчанию.</p>
+          <h3>GPU CUDA</h3>
+          <p>Инфраструктура GPU Sharing (ONNX Runtime): ускорение ML-этапов на выделенном GPU-узле.</p>
         </li>
       </ul>
     </section>

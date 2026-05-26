@@ -16,13 +16,18 @@
 
 | ENV | Описание |
 |-----|----------|
-| `GPU_SHARING_URL` | `http://81.163.244.151` |
+| `GPU_SHARING_URL` | `http://85.198.66.114:8082` |
 | `GPU_SHARING_API_KEY` | `gpu_sk_...` |
 | `GPU_SHARING_ENABLED` | `true` — проверка в `app health` |
 | `GPU_SHARING_RUNTIME` | `onnx_cuda` (по умолчанию) |
 | `GPU_SHARING_TEST_MODEL_URL` | Прямой URL ONNX для smoke (без редиректов) |
 
-**Устарело (v1/v2):** `GPU_SHARING_TRANSCRIPT=1` — Docker jobs с faster-whisper на GPU; API больше не поддерживает allowlist образов.
+| `GPU_SHARING_TRANSCRIPT` | `1` — сначала GPU Sharing, при ошибке — локальный Whisper (`GPU_SHARING_STT_FALLBACK_CPU`) |
+| `GPU_SHARING_STT_PUBLISH_HOST` | Публичный IP VPS для URL аудио (например `62.217.176.132`) |
+| `GPU_SHARING_STT_STAGING_DIR` | `/staging/gpu-audio` в контейнере (volume + `scripts/ensure-gpu-staging.sh` на хосте) |
+| `GPU_SHARING_STT_FALLBACK_CPU` | `true` — Whisper на VPS, если v3 jobs/ONNX недоступны |
+
+**Устарело (v1/v2):** Docker jobs (`POST /v1/jobs`) с faster-whisper на GPU — API возвращает 404; реальный STT на CUDA только через ONNX invoke.
 
 ## Проверка
 
@@ -51,7 +56,7 @@ ufw allow 18888/tcp
 
 Клиент: `app/gpu_sharing/client.py` (`create_invoke`, `run_invoke`, …).
 
-Swagger: http://81.163.244.151/docs/
+Swagger: http://85.198.66.114:8082/docs/
 
 ## STT через GPU (следующий этап)
 
@@ -59,4 +64,6 @@ Swagger: http://81.163.244.151/docs/
 2. Загрузка `model_url` / `inputs_url` в HTTP/S3 (без редиректов).
 3. `POST /v1/gpu/invoke` → опрос → декодирование выходов локально.
 
-Пока STT в боте — **локальный** faster-whisper в `worker-transcript` (`GPU_SHARING_TRANSCRIPT` не включать).
+С `GPU_SHARING_TRANSCRIPT=1` worker проверяет узел GPU, публикует WAV на `:18888`, пробует remote STT; при 404/ошибке — **локальный** faster-whisper на VPS (если `GPU_SHARING_STT_FALLBACK_CPU=1`).
+
+На сервере после деплоя: `./scripts/ensure-gpu-staging.sh` (или в `deploy-remote.sh`).

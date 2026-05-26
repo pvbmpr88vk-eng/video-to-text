@@ -10,6 +10,7 @@ from app.audio.ffmpeg import require_ffmpeg_tools
 from app.config import (
     GPU_SHARING_API_KEY,
     GPU_SHARING_ENABLED,
+    GPU_SHARING_STT_FALLBACK_CPU,
     OLLAMA_HOST,
     REDIS_URL,
     TELEGRAM_BOT_API_BASE_URL,
@@ -82,17 +83,27 @@ def run_health_check(*, check_ollama: bool = True) -> int:
             client = client_from_config()
             if client is None:
                 raise RuntimeError("GPU Sharing client not configured")
+            client.request_timeout_sec = 5.0
             health = client.health()
             if health.get("status") != "ok":
-                logger.error("GPU Sharing health unexpected: %s", health)
-                ok = False
+                if GPU_SHARING_STT_FALLBACK_CPU:
+                    logger.warning("GPU Sharing health unexpected: %s", health)
+                else:
+                    logger.error("GPU Sharing health unexpected: %s", health)
+                    ok = False
             elif not client.has_online_node():
-                logger.error("GPU Sharing: no online GPU nodes")
-                ok = False
+                if GPU_SHARING_STT_FALLBACK_CPU:
+                    logger.warning("GPU Sharing: no online GPU nodes")
+                else:
+                    logger.error("GPU Sharing: no online GPU nodes")
+                    ok = False
             else:
                 logger.info("GPU Sharing OK (%s, online node)", client.base_url)
         except Exception as exc:
-            logger.error("GPU Sharing check failed: %s", exc)
-            ok = False
+            if GPU_SHARING_STT_FALLBACK_CPU:
+                logger.warning("GPU Sharing check failed (CPU fallback enabled): %s", exc)
+            else:
+                logger.error("GPU Sharing check failed: %s", exc)
+                ok = False
 
     return 0 if ok else 1

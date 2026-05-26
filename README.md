@@ -308,6 +308,8 @@ FFmpeg и faster-whisper загружаются **только в transcript-wor
 - [ТЗ-06: загрузка по URL (yt-dlp)](docs/TZ-06-url-download.md)
 - [ТЗ-07: профили скорости (лёгкие модели STT и тезисов)](docs/TZ-07-speed-profiles.md)
 - [ТЗ-08: подготовка к деплою в Docker](docs/TZ-08-docker-deploy.md)
+- [ТЗ-09: Local Bot API Server в Docker](docs/TZ-09-local-bot-api.md)
+- [ТЗ-10: базовый слой GPU-интеграций](docs/TZ-10-gpu-integration-base.md)
 
 ## Этап 6: загрузка по ссылке (yt-dlp)
 

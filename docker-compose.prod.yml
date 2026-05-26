@@ -29,6 +29,8 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    environment:
+      GPU_SHARING_STT_STAGING_DIR: ${GPU_SHARING_STT_STAGING_DIR:-/staging/gpu-audio}
     deploy:
       resources:
         limits:

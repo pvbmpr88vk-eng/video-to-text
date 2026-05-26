@@ -47,3 +47,26 @@ def test_create_job_requires_id(monkeypatch: pytest.MonkeyPatch) -> None:
     client = GPUSharingClient("http://gpu.test", "key")
     with pytest.raises(GPUSharingError, match="no job id"):
         client.create_job(image="python:3.11-slim", command=["true"])
+
+
+def test_has_online_node_falls_back_to_runtimes(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/nodes":
+            return httpx.Response(401, text="unauthorized")
+        if request.url.path == "/v1/gpu/runtimes":
+            return httpx.Response(
+                200,
+                json=[{"runtime_id": "onnx_cuda", "enabled": True}],
+            )
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(
+        httpx,
+        "request",
+        lambda method, url, **kw: httpx.Client(transport=transport).request(
+            method, url, **kw
+        ),
+    )
+    client = GPUSharingClient("http://gpu.test", "key")
+    assert client.has_online_node() is True

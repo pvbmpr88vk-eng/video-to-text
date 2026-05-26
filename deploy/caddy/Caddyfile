@@ -3,7 +3,12 @@
 
 # HTTPS only for domain names (Let's Encrypt).
 {$SITE_DOMAIN} {
-	reverse_proxy site:80
+	handle /api/* {
+		reverse_proxy site-api:8080
+	}
+	handle {
+		reverse_proxy site:80
+	}
 	encode gzip zstd
 
 	header {

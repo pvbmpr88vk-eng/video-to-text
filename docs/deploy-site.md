@@ -14,6 +14,7 @@
 | Сервер | VPS с ботом (`/opt/video-to-text`) |
 | HTTPS | Caddy + Let's Encrypt (автообновление) |
 | Страница | `website/public/` (HTML + CSS) |
+| GPU на сайте | `site-api` → GPU Sharing API (`/api/gpu-status`, ключ в `.env`) |
 
 Проверка в браузере: **https://pible.ru** и https://www.pible.ru  
 

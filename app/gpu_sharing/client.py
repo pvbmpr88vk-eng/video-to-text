@@ -74,7 +74,11 @@ class GPUSharingClient:
         return list(data.get("nodes") or [])
 
     def has_online_node(self) -> bool:
-        return any(n.get("status") == "online" for n in self.list_nodes())
+        try:
+            return any(n.get("status") == "online" for n in self.list_nodes())
+        except GPUSharingError as exc:
+            logger.warning("GPU node list unavailable, falling back to runtimes: %s", exc)
+            return self.has_enabled_runtime()
 
     def list_runtimes(self) -> list[dict[str, Any]]:
         r = self._request("GET", "/v1/gpu/runtimes")
@@ -82,6 +86,14 @@ class GPUSharingClient:
         if isinstance(data, list):
             return data
         return list(data.get("runtimes") or [])
+
+    def has_enabled_runtime(self, runtime_id: str | None = None) -> bool:
+        for runtime in self.list_runtimes():
+            if runtime_id and runtime.get("runtime_id") != runtime_id:
+                continue
+            if runtime.get("enabled", True):
+                return True
+        return False
 
     def create_invoke(
         self,

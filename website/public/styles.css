@@ -46,9 +46,46 @@ a:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   max-width: 960px;
   margin: 0 auto;
   padding: 1.25rem 1.5rem;
+}
+
+.gpu-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.gpu-status--loading {
+  color: var(--muted);
+}
+
+.gpu-status--on {
+  color: #6ee7a0;
+  border-color: rgba(110, 231, 160, 0.35);
+  background: rgba(110, 231, 160, 0.08);
+}
+
+.gpu-status--warn {
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.gpu-status--off {
+  color: var(--muted);
+}
+
+.hero__gpu-detail {
+  margin: -1rem 0 1.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  min-height: 1.25rem;
 }
 
 .logo {

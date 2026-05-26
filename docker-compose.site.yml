@@ -8,6 +8,31 @@ name: videototext-site
 # DNS: A @ and www → this host's public IP (pible.ru → see docs/deploy-site.md). Ports 80/443 open.
 
 services:
+  site-api:
+    build: .
+    command: python -m app site-api
+    env_file:
+      - .env
+    restart: unless-stopped
+    expose:
+      - "8080"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "2"
+
   site:
     build: ./website
     restart: unless-stopped
@@ -29,6 +54,8 @@ services:
     restart: unless-stopped
     depends_on:
       site:
+        condition: service_healthy
+      site-api:
         condition: service_healthy
     ports:
       - "${SITE_HTTP_PORT:-80}:80"

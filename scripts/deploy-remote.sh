@@ -81,6 +81,9 @@ cd ${APP_DIR}
 WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API}
 source scripts/lib/compose-args.sh
 init_compose_args "\${PWD}"
+mkdir -p staging/gpu-audio
+chmod +x scripts/ensure-gpu-staging.sh 2>/dev/null || true
+./scripts/ensure-gpu-staging.sh || echo "WARN: GPU staging HTTP not started"
 docker compose "\${COMPOSE_FILES[@]}" "\${COMPOSE_PROFILE_ARGS[@]}" up -d --build
 ./scripts/fix-docker-volumes.sh
 echo "=== Warm up Whisper model (small) ==="
@@ -92,7 +95,7 @@ sleep 5
 WITH_LOCAL_BOT_API=${ENABLE_LOCAL_BOT_API} ./scripts/deploy-check.sh
 REMOTE
 
-if [[ -n "${SITE_DOMAIN:-}" ]]; then
+if [[ -n "${SITE_DOMAIN:-}" ]] && [[ "${DEPLOY_SKIP_SITE:-}" != "1" ]]; then
   echo "=== Site stack (SITE_DOMAIN=${SITE_DOMAIN}) ==="
   "${SSH[@]}" "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<REMOTE
 set -euo pipefail

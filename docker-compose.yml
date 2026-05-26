@@ -47,6 +47,7 @@ services:
     volumes:
       - ./output:/app/output
       - whisper_cache:/home/appuser/.cache/huggingface
+      - ./staging/gpu-audio:/staging/gpu-audio
     healthcheck:
       test: ["CMD", "python", "-m", "app", "health", "--skip-ollama"]
       interval: 30s

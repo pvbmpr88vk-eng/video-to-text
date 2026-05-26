@@ -92,13 +92,23 @@ def run_transcript_job(job_id: str) -> None:
             logger.info("Transcript job %s cancelled before STT", job_id)
             return
 
+        workers = resolve_workers(None, default=MAX_STT_WORKERS_PER_JOB)
         if GPU_SHARING_TRANSCRIPT:
-            raise TranscriptionError(
-                "GPU_SHARING_TRANSCRIPT: Docker jobs API (v1/v2) отключён. "
-                "v3 — ONNX на VPS + /v1/gpu/invoke. См. docs/gpu-sharing.md"
+            from app.gpu_sharing.prod_stt import transcribe_wav_for_prod
+
+            tr = transcribe_wav_for_prod(
+                wav,
+                output_dir=out_dir,
+                model_size=WHISPER_MODEL_DEFAULT,
+                language=job.language,
+                with_segments=True,
+                parallel=workers > 1,
+                chunk_minutes=DEFAULT_CHUNK_MINUTES,
+                workers=workers,
+                keep_chunks=False,
+                progress_callback=lambda pct, label: progress.report(pct, label),
             )
         else:
-            workers = resolve_workers(None, default=MAX_STT_WORKERS_PER_JOB)
             tr = transcribe_audio(
                 wav,
                 output_dir=out_dir,

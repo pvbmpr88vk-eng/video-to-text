@@ -283,6 +283,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="ONNX model URL for invoke test (default: GPU_SHARING_TEST_MODEL_URL)",
     )
 
+    site_api = subparsers.add_parser(
+        "site-api",
+        help="HTTP API for pible.ru (GPU status; used by site stack)",
+    )
+    site_api.add_argument("--host", default="0.0.0.0")
+    site_api.add_argument("--port", type=int, default=8080)
+
     gpu_stt = subparsers.add_parser(
         "gpu-sharing-transcribe",
         help="[deprecated v1/v2] Docker jobs STT — use ONNX v3 instead (docs/gpu-sharing.md)",
@@ -511,6 +518,11 @@ def main(argv: list[str] | None = None) -> int:
         from app.worker.health import run_health_check
 
         return run_health_check(check_ollama=not args.skip_ollama)
+    if args.command == "site-api":
+        from app.site.gpu_api import run_site_api
+
+        run_site_api(host=args.host, port=args.port)
+        return EXIT_SUCCESS
     if args.command == "gpu-sharing-check":
         from app.config import GPU_SHARING_RUNTIME, GPU_SHARING_TEST_MODEL_URL
         from app.gpu_sharing.client import GPUSharingError, client_from_config
@@ -522,13 +534,18 @@ def main(argv: list[str] | None = None) -> int:
         try:
             health = client.health()
             print(f"health: {health}")
-            nodes = client.list_nodes()
-            online = sum(1 for n in nodes if n.get("status") == "online")
-            print(f"nodes: {len(nodes)} total, {online} online")
             runtimes = client.list_runtimes()
+            runtime_ready = any(r.get("enabled", True) for r in runtimes)
             print(f"runtimes: {[r.get('runtime_id') for r in runtimes]}")
-            if online == 0:
-                print("Error: no online GPU node", file=sys.stderr)
+            try:
+                nodes = client.list_nodes()
+                online = sum(1 for n in nodes if n.get("status") == "online")
+                print(f"nodes: {len(nodes)} total, {online} online")
+            except GPUSharingError as exc:
+                online = 0
+                print(f"nodes: unavailable ({exc})", file=sys.stderr)
+            if online == 0 and not runtime_ready:
+                print("Error: no online GPU node or enabled runtime", file=sys.stderr)
                 return EXIT_INVALID_ARGS
             if args.skip_invoke:
                 return EXIT_SUCCESS

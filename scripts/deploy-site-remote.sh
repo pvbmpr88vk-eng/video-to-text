@@ -32,6 +32,13 @@ RSYNC_SSH=(rsync -avz -e "ssh -i \"${KEY}\" -o StrictHostKeyChecking=accept-new"
 "${RSYNC_SSH[@]}" \
   "${ROOT}/website/" "${DEPLOY_USER}@${DEPLOY_HOST}:${APP_DIR}/website/"
 "${RSYNC_SSH[@]}" \
+  "${ROOT}/app/site/" "${DEPLOY_USER}@${DEPLOY_HOST}:${APP_DIR}/app/site/"
+"${RSYNC_SSH[@]}" \
+  "${ROOT}/app/gpu_sharing/" "${DEPLOY_USER}@${DEPLOY_HOST}:${APP_DIR}/app/gpu_sharing/"
+"${RSYNC_SSH[@]}" \
+  "${ROOT}/app/config.py" "${ROOT}/app/__main__.py" "${ROOT}/app/__init__.py" \
+  "${DEPLOY_USER}@${DEPLOY_HOST}:${APP_DIR}/app/"
+"${RSYNC_SSH[@]}" \
   "${ROOT}/deploy/caddy/" "${DEPLOY_USER}@${DEPLOY_HOST}:${APP_DIR}/deploy/caddy/"
 "${RSYNC_SSH[@]}" \
   "${ROOT}/docker-compose.site.yml" \
